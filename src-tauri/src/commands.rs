@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tauri::State;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // Global lock to prevent concurrent transcription operations
 static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
@@ -22,6 +22,18 @@ pub struct TranscriptionResult {
     pub polished: Option<String>,
     pub final_text: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptionHistoryItem {
+    pub original: String,
+    pub polished: Option<String>,
+    pub final_text: String,
+    pub timestamp: u64,
+    pub audio_data: Option<Vec<u8>>,
+}
+
+const HISTORY_STORE_FILE: &str = "history.json";
+const MAX_HISTORY_ITEMS: usize = 20;
 
 #[tauri::command]
 pub async fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
@@ -157,6 +169,86 @@ pub async fn open_config_window(app: tauri::AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_history_item(
+    app: tauri::AppHandle,
+    item: TranscriptionHistoryItem,
+) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(HISTORY_STORE_FILE)
+        .map_err(|e| format!("Failed to open history store: {}", e))?;
+
+    // Load existing history
+    let mut history: Vec<TranscriptionHistoryItem> = store
+        .get("history")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    // Add new item at the beginning
+    history.insert(0, item);
+
+    // Limit to MAX_HISTORY_ITEMS
+    history.truncate(MAX_HISTORY_ITEMS);
+
+    // Save back
+    let history_value = serde_json::to_value(&history)
+        .map_err(|e| format!("Failed to serialize history: {}", e))?;
+
+    store.set("history", history_value);
+
+    // Immediately flush to disk
+    store
+        .save()
+        .map_err(|e| format!("Failed to save history store: {}", e))?;
+
+    log::info!("History item saved to disk, total items: {}", history.len());
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn load_history(app: tauri::AppHandle) -> Result<Vec<TranscriptionHistoryItem>, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(HISTORY_STORE_FILE)
+        .map_err(|e| format!("Failed to open history store: {}", e))?;
+
+    let history: Vec<TranscriptionHistoryItem> = store
+        .get("history")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    log::info!("Loaded {} history items from disk", history.len());
+
+    Ok(history)
+}
+
+#[tauri::command]
+pub async fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(HISTORY_STORE_FILE)
+        .map_err(|e| format!("Failed to open history store: {}", e))?;
+
+    let empty_history: Vec<TranscriptionHistoryItem> = vec![];
+    let history_value = serde_json::to_value(&empty_history)
+        .map_err(|e| format!("Failed to serialize empty history: {}", e))?;
+
+    store.set("history", history_value);
+
+    store
+        .save()
+        .map_err(|e| format!("Failed to save history store: {}", e))?;
+
+    log::info!("History cleared");
 
     Ok(())
 }

@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../store/appStore';
-import { saveAudioData } from '../utils/audioStorage';
 
 // Global lock to prevent concurrent operations
 let isOperationInProgress = false;
@@ -167,11 +166,23 @@ export function useAudioRecording() {
       // Add to history if we got a result
       if (result.final_text && result.final_text.trim()) {
         const timestamp = Date.now();
-        // Save audio to IndexedDB first
-        if (audioData && audioData.length > 0) {
-          await saveAudioData(timestamp, audioData);
-        }
+        // Update UI immediately
         addToHistory(result.original, result.polished, result.final_text, audioData ?? undefined, timestamp);
+        // Save to backend (writes to disk immediately)
+        try {
+          await invoke('save_history_item', {
+            item: {
+              original: result.original,
+              polished: result.polished,
+              final_text: result.final_text,
+              timestamp,
+              audio_data: audioData ?? null,
+            },
+          });
+          console.log('History item saved to backend');
+        } catch (err) {
+          console.error('Failed to save history item to backend:', err);
+        }
       }
       setRecordingState('idle');
       setAudioLevel(0);

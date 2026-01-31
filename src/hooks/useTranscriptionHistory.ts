@@ -1,34 +1,53 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, TranscriptionHistoryItem } from '../store/appStore';
-import { saveAudioData, getAudioData, clearAllAudioData } from '../utils/audioStorage';
 
-const HISTORY_STORAGE_KEY = 'fluxvoice_transcription_history';
+// Backend history item type (uses snake_case)
+interface BackendHistoryItem {
+  original: string;
+  polished: string | null;
+  final_text: string;
+  timestamp: number;
+  audio_data: number[] | null;
+}
+
+// Convert backend format to frontend format
+function fromBackend(item: BackendHistoryItem): TranscriptionHistoryItem {
+  return {
+    original: item.original,
+    polished: item.polished,
+    finalText: item.final_text,
+    timestamp: item.timestamp,
+    audioData: item.audio_data ?? undefined,
+  };
+}
+
+// Convert frontend format to backend format
+function toBackend(item: TranscriptionHistoryItem): BackendHistoryItem {
+  return {
+    original: item.original,
+    polished: item.polished,
+    final_text: item.finalText,
+    timestamp: item.timestamp,
+    audio_data: item.audioData ?? null,
+  };
+}
 
 export function useTranscriptionHistory() {
   const { transcriptionHistory, addToHistory: storeAddToHistory, clearHistory: storeClearHistory } = useAppStore();
   const isInitialized = useRef(false);
 
-  // Load history from localStorage on mount
+  // Load history from backend on mount
   useEffect(() => {
     if (isInitialized.current) return;
     isInitialized.current = true;
 
     const loadHistory = async () => {
       try {
-        const stored = localStorage.getItem(HISTORY_STORAGE_KEY);
-        if (stored) {
-          const items: TranscriptionHistoryItem[] = JSON.parse(stored);
-
-          // Load audio data from IndexedDB for each item
-          const itemsWithAudio = await Promise.all(
-            items.slice(0, 20).map(async (item) => {
-              const audioData = await getAudioData(item.timestamp);
-              return { ...item, audioData: audioData ?? undefined };
-            })
-          );
-
-          useAppStore.setState({ transcriptionHistory: itemsWithAudio });
-        }
+        const items = await invoke<BackendHistoryItem[]>('load_history');
+        const frontendItems = items.map(fromBackend);
+        useAppStore.setState({ transcriptionHistory: frontendItems });
+        console.log(`Loaded ${items.length} history items from backend`);
       } catch (err) {
         console.error('Failed to load transcription history:', err);
       }
@@ -37,51 +56,7 @@ export function useTranscriptionHistory() {
     loadHistory();
   }, []);
 
-  // Listen for storage changes from other windows
-  useEffect(() => {
-    const handleStorageChange = async (e: StorageEvent) => {
-      if (e.key === HISTORY_STORAGE_KEY) {
-        if (e.newValue === null) {
-          // History was cleared in another window
-          storeClearHistory();
-        } else {
-          try {
-            const items: TranscriptionHistoryItem[] = JSON.parse(e.newValue);
-
-            // Load audio data from IndexedDB for each item
-            const itemsWithAudio = await Promise.all(
-              items.slice(0, 20).map(async (item) => {
-                const audioData = await getAudioData(item.timestamp);
-                return { ...item, audioData: audioData ?? undefined };
-              })
-            );
-
-            useAppStore.setState({ transcriptionHistory: itemsWithAudio });
-          } catch (err) {
-            console.error('Failed to parse history from storage event:', err);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, [storeClearHistory]);
-
-  // Save history to localStorage when it changes (exclude audioData, it's in IndexedDB)
-  useEffect(() => {
-    if (!isInitialized.current) return;
-
-    try {
-      // Strip audioData before saving to localStorage
-      const historyWithoutAudio = transcriptionHistory.map(({ audioData, ...rest }) => rest);
-      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(historyWithoutAudio));
-    } catch (err) {
-      console.error('Failed to save transcription history:', err);
-    }
-  }, [transcriptionHistory]);
-
-  // Add to history and save audio to IndexedDB
+  // Add to history and save to backend immediately
   const addToHistory = useCallback(async (
     original: string,
     polished: string | null,
@@ -90,20 +65,35 @@ export function useTranscriptionHistory() {
   ) => {
     const timestamp = Date.now();
 
-    // Save audio data to IndexedDB if present
-    if (audioData && audioData.length > 0) {
-      await saveAudioData(timestamp, audioData);
-    }
+    const item: TranscriptionHistoryItem = {
+      original,
+      polished,
+      finalText,
+      timestamp,
+      audioData,
+    };
 
-    // Add to store (with audioData for current session)
+    // Add to store for immediate UI update
     storeAddToHistory(original, polished, finalText, audioData, timestamp);
+
+    // Save to backend (writes to disk immediately)
+    try {
+      await invoke('save_history_item', { item: toBackend(item) });
+      console.log('History item saved to backend');
+    } catch (err) {
+      console.error('Failed to save history item to backend:', err);
+    }
   }, [storeAddToHistory]);
 
-  // Clear history from both store, localStorage, and IndexedDB
+  // Clear history from both store and backend
   const clearHistory = useCallback(async () => {
-    await clearAllAudioData();
-    localStorage.removeItem(HISTORY_STORAGE_KEY);
-    storeClearHistory();
+    try {
+      await invoke('clear_history');
+      storeClearHistory();
+      console.log('History cleared');
+    } catch (err) {
+      console.error('Failed to clear history:', err);
+    }
   }, [storeClearHistory]);
 
   return {
