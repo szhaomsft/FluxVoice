@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 #[cfg(target_os = "windows")]
-use clipboard_win::{formats, set_clipboard};
+use clipboard_win::{formats, get_clipboard, set_clipboard};
 
 // Commands to send to the injector thread
 enum InjectorCommand {
@@ -67,6 +67,9 @@ fn inject_text_impl(enigo: &mut Enigo, text: &str) -> Result<(), String> {
     // Small delay to ensure target window is focused
     thread::sleep(Duration::from_millis(100));
 
+    // Save original clipboard content
+    let original_clipboard = get_clipboard_text();
+
     // Use clipboard approach for better reliability
     copy_to_clipboard(text)?;
 
@@ -83,6 +86,14 @@ fn inject_text_impl(enigo: &mut Enigo, text: &str) -> Result<(), String> {
         .key(Key::Control, enigo::Direction::Release)
         .map_err(|e| format!("Failed to release Ctrl: {}", e))?;
 
+    // Wait for paste to complete, then restore original clipboard
+    thread::sleep(Duration::from_millis(100));
+    if let Some(original) = original_clipboard {
+        if let Err(e) = copy_to_clipboard(&original) {
+            log::warn!("Failed to restore clipboard: {}", e);
+        }
+    }
+
     log::info!("Text injected successfully");
     Ok(())
 }
@@ -92,7 +103,17 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
     set_clipboard(formats::Unicode, text).map_err(|e| format!("Clipboard error: {}", e))
 }
 
+#[cfg(target_os = "windows")]
+fn get_clipboard_text() -> Option<String> {
+    get_clipboard::<String, _>(formats::Unicode).ok()
+}
+
 #[cfg(not(target_os = "windows"))]
 fn copy_to_clipboard(_text: &str) -> Result<(), String> {
     Err("Clipboard operation not supported on this platform".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_clipboard_text() -> Option<String> {
+    None
 }

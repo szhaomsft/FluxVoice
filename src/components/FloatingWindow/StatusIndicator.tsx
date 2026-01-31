@@ -9,8 +9,15 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+// Format seconds to mm:ss
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 export const StatusIndicator: React.FC = () => {
-  const { recordingState, error, uploadSize } = useAppStore();
+  const { recordingState, error, uploadSize, recordingDuration } = useAppStore();
 
   const getIcon = () => {
     switch (recordingState) {
@@ -35,7 +42,7 @@ export const StatusIndicator: React.FC = () => {
   const getLabel = () => {
     switch (recordingState) {
       case 'recording':
-        return 'Recording...';
+        return `Recording ${formatDuration(recordingDuration)}`;
       case 'processing':
         return uploadSize ? `Uploading ${formatBytes(uploadSize)}...` : 'Processing...';
       case 'error':

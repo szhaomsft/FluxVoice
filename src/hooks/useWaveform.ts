@@ -1,8 +1,8 @@
 import { useRef, useEffect } from 'react';
 
 export function useWaveform(audioLevel: number, isRecording: boolean) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationRef = useRef<number | undefined>(undefined);
   const historyRef = useRef<number[]>([]);
 
   useEffect(() => {

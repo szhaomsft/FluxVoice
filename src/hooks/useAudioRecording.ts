@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../store/appStore';
 
@@ -26,17 +26,30 @@ function playStartSound() {
 }
 
 export function useAudioRecording() {
-  const { setRecordingState, setAudioLevel, setTranscription, setError, setUploadSize } = useAppStore();
+  const {
+    setRecordingState,
+    setAudioLevel,
+    setTranscription,
+    setError,
+    setUploadSize,
+    setRecordingStartTime,
+    setRecordingDuration,
+    addToHistory,
+  } = useAppStore();
   const [intervalId, setIntervalId] = useState<number | null>(null);
+  const [durationIntervalId, setDurationIntervalId] = useState<number | null>(null);
 
   const startRecording = useCallback(async () => {
     try {
       setError(null);
       setUploadSize(null);
+      setRecordingDuration(0);
 
       // Play start sound
       playStartSound();
 
+      const startTime = Date.now();
+      setRecordingStartTime(startTime);
       setRecordingState('recording');
       await invoke('start_recording');
 
@@ -51,26 +64,40 @@ export function useAudioRecording() {
       }, 50); // Update 20 times per second
 
       setIntervalId(id);
+
+      // Start duration timer
+      const durationId = window.setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setRecordingDuration(elapsed);
+      }, 100);
+
+      setDurationIntervalId(durationId);
     } catch (err) {
       console.error('Failed to start recording:', err);
       setError(err as string);
       setRecordingState('error');
+      setRecordingStartTime(null);
       // Auto-recover from error after 3 seconds
       setTimeout(() => {
         setRecordingState('idle');
         setError(null);
       }, 3000);
     }
-  }, [setRecordingState, setAudioLevel, setError, setUploadSize]);
+  }, [setRecordingState, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration]);
 
   const stopRecording = useCallback(async () => {
-    // Always clear interval first
+    // Always clear intervals first
     if (intervalId) {
       clearInterval(intervalId);
       setIntervalId(null);
     }
+    if (durationIntervalId) {
+      clearInterval(durationIntervalId);
+      setDurationIntervalId(null);
+    }
 
     setRecordingState('processing');
+    setRecordingStartTime(null);
 
     let audioData: number[] | null = null;
 
@@ -87,6 +114,7 @@ export function useAudioRecording() {
       setRecordingState('error');
       setAudioLevel(0);
       setUploadSize(null);
+      setRecordingDuration(0);
       // Auto-recover from error after 3 seconds
       setTimeout(() => {
         setRecordingState('idle');
@@ -102,20 +130,26 @@ export function useAudioRecording() {
       });
 
       setTranscription(result);
+      // Add to history if we got a result
+      if (result && result.trim()) {
+        addToHistory(result);
+      }
       setRecordingState('idle');
       setAudioLevel(0);
+      setRecordingDuration(0);
     } catch (err) {
       console.error('Failed to transcribe:', err);
       setError(err as string);
       setRecordingState('error');
       setAudioLevel(0);
+      setRecordingDuration(0);
       // Auto-recover from error after 3 seconds
       setTimeout(() => {
         setRecordingState('idle');
         setError(null);
       }, 3000);
     }
-  }, [intervalId, setRecordingState, setTranscription, setAudioLevel, setError, setUploadSize]);
+  }, [intervalId, durationIntervalId, setRecordingState, setTranscription, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration, addToHistory]);
 
   // Reset function to clear state after error recovery
   const resetState = useCallback(() => {
@@ -123,10 +157,16 @@ export function useAudioRecording() {
       clearInterval(intervalId);
       setIntervalId(null);
     }
+    if (durationIntervalId) {
+      clearInterval(durationIntervalId);
+      setDurationIntervalId(null);
+    }
     setRecordingState('idle');
     setError(null);
     setAudioLevel(0);
-  }, [intervalId, setRecordingState, setError, setAudioLevel]);
+    setRecordingDuration(0);
+    setRecordingStartTime(null);
+  }, [intervalId, durationIntervalId, setRecordingState, setError, setAudioLevel, setRecordingDuration, setRecordingStartTime]);
 
   return {
     startRecording,
