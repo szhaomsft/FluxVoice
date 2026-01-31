@@ -38,7 +38,9 @@ pub async fn polish_text(
 
     let system_message = "You are a text polishing assistant. \
         Improve the given text by fixing grammar, punctuation, and clarity. \
-        Keep the original meaning and tone. Return only the polished text without explanations.";
+        Keep the original meaning, tone, and language. \
+        IMPORTANT: Always respond in the same language as the input text. \
+        Return only the polished text without explanations.";
 
     let request = ChatCompletionRequest {
         messages: vec![
