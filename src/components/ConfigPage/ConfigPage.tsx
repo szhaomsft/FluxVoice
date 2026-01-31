@@ -256,7 +256,7 @@ export const ConfigPage: React.FC = () => {
             </div>
 
             {/* Save Button */}
-            <div className="flex justify-end gap-4 mt-8">
+            <div className="flex justify-end gap-4 mt-12 pt-6 border-t border-gray-200 dark:border-gray-700">
               {saveMessage && (
                 <div
                   className={`px-4 py-2 rounded-lg ${
