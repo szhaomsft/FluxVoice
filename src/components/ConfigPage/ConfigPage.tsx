@@ -86,7 +86,8 @@ export const ConfigPage: React.FC = () => {
 
         {/* Settings Tab */}
         {activeTab === 'settings' && (
-          <div className="space-y-6">
+          <>
+            <div className="space-y-6">
             {/* Azure Settings */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ padding: '24px 32px' }}>
               <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Azure Configuration</h2>
@@ -254,25 +255,26 @@ export const ConfigPage: React.FC = () => {
                 </div>
               </div>
             </div>
-
-            {/* Save Button */}
-            <div className="flex justify-end gap-4 mt-12 pt-6 border-t border-gray-200 dark:border-gray-700">
-              {saveMessage && (
-                <div
-                  className={`px-4 py-2 rounded-lg ${
-                    saveMessage.includes('success')
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-red-100 text-red-700'
-                  }`}
-                >
-                  {saveMessage}
-                </div>
-              )}
-              <Button onClick={handleSave} disabled={isSaving}>
-                {isSaving ? 'Saving...' : 'Save Configuration'}
-              </Button>
-            </div>
           </div>
+
+          {/* Save Button */}
+          <div className="flex justify-end gap-4 mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
+            {saveMessage && (
+              <div
+                className={`px-4 py-2 rounded-lg ${
+                  saveMessage.includes('success')
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-red-700'
+                }`}
+              >
+                {saveMessage}
+              </div>
+            )}
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? 'Saving...' : 'Save Configuration'}
+            </Button>
+          </div>
+          </>
         )}
 
         {/* History Tab */}
