@@ -16,20 +16,35 @@ export function useTranscriptionHistory() {
       const stored = localStorage.getItem(HISTORY_STORAGE_KEY);
       if (stored) {
         const items: TranscriptionHistoryItem[] = JSON.parse(stored);
-        // Add items in reverse order so newest ends up first
-        items.reverse().forEach((item) => {
-          useAppStore.setState((state) => ({
-            transcriptionHistory: [
-              item,
-              ...state.transcriptionHistory.filter((h) => h.timestamp !== item.timestamp),
-            ].slice(0, 20),
-          }));
-        });
+        // Set all items at once
+        useAppStore.setState({ transcriptionHistory: items.slice(0, 20) });
       }
     } catch (err) {
       console.error('Failed to load transcription history:', err);
     }
   }, []);
+
+  // Listen for storage changes from other windows
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === HISTORY_STORAGE_KEY) {
+        if (e.newValue === null) {
+          // History was cleared in another window
+          storeClearHistory();
+        } else {
+          try {
+            const items: TranscriptionHistoryItem[] = JSON.parse(e.newValue);
+            useAppStore.setState({ transcriptionHistory: items.slice(0, 20) });
+          } catch (err) {
+            console.error('Failed to parse history from storage event:', err);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [storeClearHistory]);
 
   // Save history to localStorage when it changes
   useEffect(() => {
