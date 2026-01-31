@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use reqwest::multipart;
+use super::get_http_client;
 
 #[derive(Debug, Deserialize)]
 struct FastTranscriptionResponse {
@@ -37,9 +38,9 @@ pub async fn transcribe_audio(
         region
     );
 
-    let client = reqwest::Client::new();
+    let client = get_http_client();
 
-    log::info!("Sending {} bytes of audio to Azure Fast Transcription API (en-US, zh-CN)", audio_data.len());
+    log::info!("Sending {} bytes of Opus audio to Azure Fast Transcription API (en-US, zh-CN)", audio_data.len());
 
     // Build definition with multiple locales for auto-detection
     let definition = TranscriptionDefinition {
@@ -49,10 +50,10 @@ pub async fn transcribe_audio(
     let definition_json = serde_json::to_string(&definition)
         .map_err(|e| format!("Failed to serialize definition: {}", e))?;
 
-    // Create multipart form
+    // Create multipart form with Opus/OGG audio
     let audio_part = multipart::Part::bytes(audio_data)
-        .file_name("audio.wav")
-        .mime_str("audio/wav")
+        .file_name("audio.ogg")
+        .mime_str("audio/ogg")
         .map_err(|e| format!("Failed to create audio part: {}", e))?;
 
     let definition_part = multipart::Part::text(definition_json)

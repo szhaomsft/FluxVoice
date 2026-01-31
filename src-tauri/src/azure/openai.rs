@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use super::get_http_client;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ChatMessage {
@@ -54,7 +55,7 @@ pub async fn polish_text(
         temperature: 0.3,
     };
 
-    let client = reqwest::Client::new();
+    let client = get_http_client();
 
     log::info!("Sending text to Azure OpenAI for polishing");
 

@@ -3,9 +3,13 @@ use crate::azure::{openai, speech};
 use crate::config::{store, AppConfig};
 use crate::input::TextInjector;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tauri::State;
 use serde::Serialize;
+
+// Global lock to prevent concurrent transcription operations
+static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
 
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
@@ -53,6 +57,21 @@ pub async fn transcribe_and_insert(
     state: State<'_, AppState>,
     audio_data: Vec<u8>,
 ) -> Result<TranscriptionResult, String> {
+    // Prevent concurrent transcription operations
+    if IS_TRANSCRIBING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        log::warn!("transcribe_and_insert called while another transcription is in progress - ignoring");
+        return Err("Transcription already in progress".to_string());
+    }
+
+    // Use a guard to ensure IS_TRANSCRIBING is reset even if we return early
+    struct TranscriptionGuard;
+    impl Drop for TranscriptionGuard {
+        fn drop(&mut self) {
+            IS_TRANSCRIBING.store(false, Ordering::SeqCst);
+        }
+    }
+    let _guard = TranscriptionGuard;
+
     // Load config
     let config = store::load_config(&app)?;
 

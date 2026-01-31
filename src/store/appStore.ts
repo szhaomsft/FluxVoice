@@ -6,6 +6,7 @@ export interface TranscriptionHistoryItem {
   polished: string | null;
   finalText: string;
   timestamp: number;
+  audioData?: number[]; // Opus/OGG audio data for playback
 }
 
 interface AppStore {
@@ -29,7 +30,7 @@ interface AppStore {
   setUploadSize: (size: number | null) => void;
   setRecordingStartTime: (time: number | null) => void;
   setRecordingDuration: (duration: number) => void;
-  addToHistory: (original: string, polished: string | null, finalText: string) => void;
+  addToHistory: (original: string, polished: string | null, finalText: string, audioData?: number[], timestamp?: number) => void;
   clearHistory: () => void;
 }
 
@@ -54,10 +55,10 @@ export const useAppStore = create<AppStore>((set) => ({
   setUploadSize: (size) => set({ uploadSize: size }),
   setRecordingStartTime: (time) => set({ recordingStartTime: time }),
   setRecordingDuration: (duration) => set({ recordingDuration: duration }),
-  addToHistory: (original, polished, finalText) =>
+  addToHistory: (original, polished, finalText, audioData, timestamp) =>
     set((state) => ({
       transcriptionHistory: [
-        { original, polished, finalText, timestamp: Date.now() },
+        { original, polished, finalText, timestamp: timestamp ?? Date.now(), audioData },
         ...state.transcriptionHistory,
       ].slice(0, MAX_HISTORY_ITEMS),
     })),

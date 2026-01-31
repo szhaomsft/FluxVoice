@@ -1,6 +1,10 @@
 import { useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../store/appStore';
+import { saveAudioData } from '../utils/audioStorage';
+
+// Global lock to prevent concurrent operations
+let isOperationInProgress = false;
 
 // Play a short beep sound using Web Audio API
 function playStartSound() {
@@ -40,10 +44,28 @@ export function useAudioRecording() {
   const [durationIntervalId, setDurationIntervalId] = useState<number | null>(null);
 
   const startRecording = useCallback(async () => {
+    // Prevent concurrent operations
+    if (isOperationInProgress) {
+      console.log('startRecording blocked - operation in progress');
+      return;
+    }
+    isOperationInProgress = true;
+
+    // Clear any leftover intervals from previous recording
+    if (intervalId) {
+      clearInterval(intervalId);
+      setIntervalId(null);
+    }
+    if (durationIntervalId) {
+      clearInterval(durationIntervalId);
+      setDurationIntervalId(null);
+    }
+
     try {
       setError(null);
       setUploadSize(null);
       setRecordingDuration(0);
+      setAudioLevel(0);
 
       // Play start sound
       playStartSound();
@@ -75,17 +97,25 @@ export function useAudioRecording() {
     } catch (err) {
       console.error('Failed to start recording:', err);
       setError(err as string);
-      setRecordingState('error');
+      setRecordingState('idle'); // Immediately return to idle so user can retry
       setRecordingStartTime(null);
-      // Auto-recover from error after 3 seconds
+      // Clear error message after 3 seconds
       setTimeout(() => {
-        setRecordingState('idle');
         setError(null);
       }, 3000);
+    } finally {
+      isOperationInProgress = false;
     }
-  }, [setRecordingState, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration]);
+  }, [intervalId, durationIntervalId, setRecordingState, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration]);
 
   const stopRecording = useCallback(async () => {
+    // Prevent multiple stop calls
+    if (isOperationInProgress) {
+      console.log('stopRecording blocked - operation in progress');
+      return;
+    }
+    isOperationInProgress = true;
+
     // Always clear intervals first
     if (intervalId) {
       clearInterval(intervalId);
@@ -111,13 +141,13 @@ export function useAudioRecording() {
     } catch (err) {
       console.error('Failed to stop recording:', err);
       setError(err as string);
-      setRecordingState('error');
+      setRecordingState('idle'); // Immediately return to idle so user can retry
       setAudioLevel(0);
       setUploadSize(null);
       setRecordingDuration(0);
-      // Auto-recover from error after 3 seconds
+      isOperationInProgress = false;
+      // Clear error message after 3 seconds
       setTimeout(() => {
-        setRecordingState('idle');
         setError(null);
       }, 3000);
       return;
@@ -136,7 +166,12 @@ export function useAudioRecording() {
       setTranscription(result.final_text);
       // Add to history if we got a result
       if (result.final_text && result.final_text.trim()) {
-        addToHistory(result.original, result.polished, result.final_text);
+        const timestamp = Date.now();
+        // Save audio to IndexedDB first
+        if (audioData && audioData.length > 0) {
+          await saveAudioData(timestamp, audioData);
+        }
+        addToHistory(result.original, result.polished, result.final_text, audioData ?? undefined, timestamp);
       }
       setRecordingState('idle');
       setAudioLevel(0);
@@ -144,14 +179,15 @@ export function useAudioRecording() {
     } catch (err) {
       console.error('Failed to transcribe:', err);
       setError(err as string);
-      setRecordingState('error');
+      setRecordingState('idle'); // Immediately return to idle so user can retry
       setAudioLevel(0);
       setRecordingDuration(0);
-      // Auto-recover from error after 3 seconds
+      // Clear error message after 3 seconds
       setTimeout(() => {
-        setRecordingState('idle');
         setError(null);
       }, 3000);
+    } finally {
+      isOperationInProgress = false;
     }
   }, [intervalId, durationIntervalId, setRecordingState, setTranscription, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration, addToHistory]);
 

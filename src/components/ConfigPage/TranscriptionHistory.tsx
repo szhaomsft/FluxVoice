@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { Clock, Copy, Check, Trash2, Sparkles } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Clock, Copy, Check, Trash2, Sparkles, Play, Square, Download } from 'lucide-react';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeFile } from '@tauri-apps/plugin-fs';
 import { useTranscriptionHistory } from '../../hooks/useTranscriptionHistory';
 
 function formatTimestamp(timestamp: number): string {
@@ -20,6 +22,8 @@ function formatTimestamp(timestamp: number): string {
 export const TranscriptionHistory: React.FC = () => {
   const { transcriptionHistory, clearHistory } = useTranscriptionHistory();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [playingKey, setPlayingKey] = useState<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const handleCopy = async (text: string, key: string) => {
     try {
@@ -28,6 +32,82 @@ export const TranscriptionHistory: React.FC = () => {
       setTimeout(() => setCopiedKey(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  };
+
+  const handlePlayAudio = (audioData: number[], timestamp: number) => {
+    // If clicking the same item that's playing, just stop
+    if (playingKey === timestamp) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setPlayingKey(null);
+      return;
+    }
+
+    // If another audio is playing, ignore this click (user must stop it first)
+    if (playingKey !== null) {
+      return;
+    }
+
+    // Convert number array to Uint8Array and create blob
+    const uint8Array = new Uint8Array(audioData);
+    const blob = new Blob([uint8Array], { type: 'audio/ogg; codecs=opus' });
+    const url = URL.createObjectURL(blob);
+
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    setPlayingKey(timestamp);
+
+    audio.onended = () => {
+      setPlayingKey(null);
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+    };
+
+    audio.onerror = () => {
+      console.error('Failed to play audio');
+      setPlayingKey(null);
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+    };
+
+    audio.play().catch((err) => {
+      console.error('Failed to play audio:', err);
+      setPlayingKey(null);
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+    });
+  };
+
+  const handleStopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlayingKey(null);
+  };
+
+  const handleSaveAudio = async (audioData: number[], timestamp: number) => {
+    // Create filename with timestamp
+    const date = new Date(timestamp);
+    const defaultFilename = `fluxvoice_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}.ogg`;
+
+    try {
+      // Open save dialog
+      const filePath = await save({
+        defaultPath: defaultFilename,
+        filters: [{ name: 'Audio', extensions: ['ogg'] }],
+      });
+
+      if (filePath) {
+        // Convert number array to Uint8Array and write to file
+        const uint8Array = new Uint8Array(audioData);
+        await writeFile(filePath, uint8Array);
+      }
+    } catch (err) {
+      console.error('Failed to save audio:', err);
     }
   };
 
@@ -118,10 +198,49 @@ export const TranscriptionHistory: React.FC = () => {
               </div>
             )}
 
-            {/* Timestamp */}
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              {formatTimestamp(item.timestamp)}
-            </p>
+            {/* Timestamp and playback */}
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {formatTimestamp(item.timestamp)}
+              </p>
+              {item.audioData && item.audioData.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() =>
+                      playingKey === item.timestamp
+                        ? handleStopAudio()
+                        : handlePlayAudio(item.audioData!, item.timestamp)
+                    }
+                    className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full transition-colors ${
+                      playingKey === item.timestamp
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-600 dark:text-gray-300 dark:hover:bg-gray-500'
+                    }`}
+                    title={playingKey === item.timestamp ? 'Stop playback' : 'Play recording'}
+                  >
+                    {playingKey === item.timestamp ? (
+                      <>
+                        <Square className="w-3 h-3" />
+                        <span>Stop</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3 h-3" />
+                        <span>Play</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleSaveAudio(item.audioData!, item.timestamp)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-600 dark:text-gray-300 dark:hover:bg-gray-500 transition-colors"
+                    title="Save recording"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Save</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>

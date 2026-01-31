@@ -1,14 +1,14 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat};
-use hound::{WavSpec, WavWriter};
 use std::io::Cursor;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
 use tokio::sync::oneshot;
+use audiopus::{coder::Encoder, Application, Channels, SampleRate};
+use ogg::writing::PacketWriteEndInfo;
 
 const TARGET_SAMPLE_RATE: u32 = 16000; // Optimal for Azure Speech Service
-const CHANNELS: u16 = 1; // Mono
-const BITS_PER_SAMPLE: u16 = 16;
+const OPUS_FRAME_SIZE: usize = 960; // 60ms at 16kHz (recommended for voice)
 
 pub struct AudioRecorder {
     buffer: Arc<StdMutex<Vec<f32>>>,
@@ -40,20 +40,31 @@ impl AudioRecorder {
     }
 
     pub fn start_recording(&mut self) -> Result<(), String> {
+        // Check if already recording - stop previous recording first
+        {
+            let is_recording = self.is_recording.lock().unwrap();
+            if *is_recording {
+                log::warn!("start_recording called but already recording - stopping previous recording first");
+                drop(is_recording); // Release lock before stopping
+
+                // Send stop signal to previous recording
+                if let Some(sender) = self.stop_sender.take() {
+                    let _ = sender.send(());
+                }
+
+                // Wait for previous recording to stop
+                std::thread::sleep(std::time::Duration::from_millis(150));
+
+                // Force reset the flag
+                let mut is_rec = self.is_recording.lock().unwrap();
+                *is_rec = false;
+            }
+        }
+
         // Clear previous buffer
         {
             let mut buffer = self.buffer.lock().unwrap();
             buffer.clear();
-        }
-
-        // Check if already recording - if so, try to reset
-        {
-            let mut is_recording = self.is_recording.lock().unwrap();
-            if *is_recording {
-                log::warn!("start_recording called but is_recording flag is still true - forcing reset");
-                // Force reset the flag - previous recording likely crashed
-                *is_recording = false;
-            }
         }
 
         // Clear any pending stop sender
@@ -238,8 +249,8 @@ impl AudioRecorder {
 
         log::info!("Resampled to {} samples at {} Hz", resampled.len(), TARGET_SAMPLE_RATE);
 
-        // Convert to WAV format
-        samples_to_wav(&resampled)
+        // Convert to Opus/OGG format
+        samples_to_opus(&resampled)
     }
 
     pub fn get_audio_level(&self) -> f32 {
@@ -314,30 +325,103 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     output
 }
 
-fn samples_to_wav(samples: &[f32]) -> Result<Vec<u8>, String> {
-    let mut cursor = Cursor::new(Vec::new());
+fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
+    // Create Opus encoder
+    let mut encoder = Encoder::new(SampleRate::Hz16000, Channels::Mono, Application::Voip)
+        .map_err(|e| format!("Failed to create Opus encoder: {:?}", e))?;
 
-    let spec = WavSpec {
-        channels: CHANNELS,
-        sample_rate: TARGET_SAMPLE_RATE,
-        bits_per_sample: BITS_PER_SAMPLE,
-        sample_format: hound::SampleFormat::Int,
-    };
-
-    let mut writer =
-        WavWriter::new(&mut cursor, spec).map_err(|e| format!("Failed to create WAV writer: {}", e))?;
+    // Set bitrate for voice (16kbps is good for speech)
+    encoder.set_bitrate(audiopus::Bitrate::BitsPerSecond(16000))
+        .map_err(|e| format!("Failed to set bitrate: {:?}", e))?;
 
     // Convert f32 samples to i16
-    for sample in samples {
-        let amplitude = (sample * i16::MAX as f32) as i16;
-        writer
-            .write_sample(amplitude)
-            .map_err(|e| format!("Failed to write sample: {}", e))?;
+    let i16_samples: Vec<i16> = samples
+        .iter()
+        .map(|s| (*s * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
+        .collect();
+
+    // Create OGG container
+    let mut cursor = Cursor::new(Vec::new());
+    let serial = rand_serial();
+    let mut packet_writer = ogg::writing::PacketWriter::new(&mut cursor);
+
+    // Write Opus header (OpusHead)
+    let opus_head = create_opus_head();
+    packet_writer.write_packet(opus_head, serial, PacketWriteEndInfo::EndPage, 0)
+        .map_err(|e| format!("Failed to write OpusHead: {}", e))?;
+
+    // Write Opus comment header (OpusTags)
+    let opus_tags = create_opus_tags();
+    packet_writer.write_packet(opus_tags, serial, PacketWriteEndInfo::EndPage, 0)
+        .map_err(|e| format!("Failed to write OpusTags: {}", e))?;
+
+    // Encode audio in frames
+    let mut granule_pos: u64 = 0;
+    let mut encoded_buf = vec![0u8; 4000]; // Max Opus packet size
+
+    for chunk in i16_samples.chunks(OPUS_FRAME_SIZE) {
+        // Pad last frame if needed
+        let frame: Vec<i16> = if chunk.len() < OPUS_FRAME_SIZE {
+            let mut padded = chunk.to_vec();
+            padded.resize(OPUS_FRAME_SIZE, 0);
+            padded
+        } else {
+            chunk.to_vec()
+        };
+
+        let encoded_len = encoder.encode(&frame, &mut encoded_buf)
+            .map_err(|e| format!("Failed to encode Opus frame: {:?}", e))?;
+
+        // Granule position is in 48kHz samples (Opus standard), so multiply by 3 (48000/16000)
+        granule_pos += (OPUS_FRAME_SIZE as u64) * 3;
+
+        let is_last = chunk.len() < OPUS_FRAME_SIZE;
+        let end_info = if is_last {
+            PacketWriteEndInfo::EndStream
+        } else {
+            PacketWriteEndInfo::NormalPacket
+        };
+
+        packet_writer.write_packet(
+            encoded_buf[..encoded_len].to_vec(),
+            serial,
+            end_info,
+            granule_pos,
+        ).map_err(|e| format!("Failed to write Opus packet: {}", e))?;
     }
 
-    writer
-        .finalize()
-        .map_err(|e| format!("Failed to finalize WAV: {}", e))?;
+    let result = cursor.into_inner();
+    log::info!("Encoded {} samples to {} bytes Opus/OGG", samples.len(), result.len());
 
-    Ok(cursor.into_inner())
+    Ok(result)
+}
+
+fn rand_serial() -> u32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u32)
+        .unwrap_or(12345678)
+}
+
+fn create_opus_head() -> Vec<u8> {
+    let mut head = Vec::with_capacity(19);
+    head.extend_from_slice(b"OpusHead");  // Magic signature
+    head.push(1);                          // Version
+    head.push(1);                          // Channel count (mono)
+    head.extend_from_slice(&0u16.to_le_bytes());  // Pre-skip
+    head.extend_from_slice(&48000u32.to_le_bytes()); // Original sample rate (Opus always uses 48kHz internally)
+    head.extend_from_slice(&0i16.to_le_bytes());  // Output gain
+    head.push(0);                          // Channel mapping family
+    head
+}
+
+fn create_opus_tags() -> Vec<u8> {
+    let mut tags = Vec::new();
+    tags.extend_from_slice(b"OpusTags");  // Magic signature
+    let vendor = b"FluxVoice";
+    tags.extend_from_slice(&(vendor.len() as u32).to_le_bytes());
+    tags.extend_from_slice(vendor);
+    tags.extend_from_slice(&0u32.to_le_bytes()); // No user comments
+    tags
 }
