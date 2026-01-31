@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useAppStore, TranscriptionHistoryItem } from '../store/appStore';
 
 const HISTORY_STORAGE_KEY = 'fluxvoice_transcription_history';
 
 export function useTranscriptionHistory() {
-  const { transcriptionHistory, addToHistory, clearHistory } = useAppStore();
+  const { transcriptionHistory, addToHistory, clearHistory: storeClearHistory } = useAppStore();
   const isInitialized = useRef(false);
 
   // Load history from localStorage on mount
@@ -41,6 +41,12 @@ export function useTranscriptionHistory() {
       console.error('Failed to save transcription history:', err);
     }
   }, [transcriptionHistory]);
+
+  // Clear history from both store and localStorage
+  const clearHistory = useCallback(() => {
+    localStorage.removeItem(HISTORY_STORAGE_KEY);
+    storeClearHistory();
+  }, [storeClearHistory]);
 
   return {
     transcriptionHistory,
