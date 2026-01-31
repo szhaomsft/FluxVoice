@@ -49,13 +49,13 @@ npm run tauri dev
    - Azure Speech Region (e.g., "eastus")
    - (Optional) Azure OpenAI credentials
 4. **Save configuration**
-5. **Start using**: Press **Ctrl+F12** to record voice
+5. **Start using**: Press **Ctrl+Shift+Z** to record voice
 
 ## 🎯 How to Use
 
-1. Press **Ctrl+F12** → Recording starts (waveform animates)
+1. Press **Ctrl+Shift+Z** → Recording starts (waveform animates)
 2. Speak into your microphone
-3. Press **Ctrl+F12** again → Recording stops
+3. Press **Ctrl+Shift+Z** again → Recording stops
 4. App transcribes → polishes (if enabled) → inserts text
 
 ## 🔑 Azure Setup
@@ -130,7 +130,7 @@ FluxVoice/
 ## 🎨 Features
 
 - ✅ Always-on-top floating window
-- ✅ Global hotkey (Ctrl+F12)
+- ✅ Global hotkey (Ctrl+Shift+Z)
 - ✅ Real-time waveform visualization
 - ✅ Azure Speech transcription
 - ✅ Azure OpenAI text polishing

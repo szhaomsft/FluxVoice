@@ -5,7 +5,7 @@ A voice input method application with Azure Speech transcription and OpenAI poli
 ## Features
 
 - **Always-on-top floating window** - Minimal, transparent UI that stays visible
-- **Global hotkey activation** - Press Ctrl+F12 to start/stop recording
+- **Global hotkey activation** - Press Ctrl+Shift+Z to start/stop recording
 - **Azure Fast Transcription** - Real-time speech-to-text using Azure Cognitive Services
 - **AI Text Polishing** - Optional enhancement with Azure OpenAI GPT-4.1
 - **Auto-insertion** - Automatically paste transcribed text into active windows
@@ -48,14 +48,14 @@ npm run tauri build
 
 ### Hotkey
 
-Default hotkey is **Ctrl+F12**. Press once to start recording, press again to stop.
+Default hotkey is **Ctrl+Shift+Z**. Press once to start recording, press again to stop.
 
 ## Usage
 
 1. Launch FluxVoice - a small floating window will appear
-2. Press **Ctrl+F12** to start voice recording
+2. Press **Ctrl+Shift+Z** to start voice recording
 3. Speak clearly into your microphone
-4. Press **Ctrl+F12** again to stop recording
+4. Press **Ctrl+Shift+Z** again to stop recording
 5. Text will be transcribed, polished (if enabled), and auto-inserted
 
 ## Architecture

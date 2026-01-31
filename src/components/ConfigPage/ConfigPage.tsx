@@ -216,7 +216,7 @@ export const ConfigPage: React.FC = () => {
                   {` + ${localConfig.hotkey.key}`}
                 </div>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Default: Ctrl + F12 (Press to activate/deactivate recording)
+                  Default: Ctrl + Shift + Z (Press to activate/deactivate recording)
                 </p>
               </div>
             </div>
