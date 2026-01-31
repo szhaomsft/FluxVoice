@@ -1,6 +1,6 @@
 use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
-    GlobalHotKeyEvent, GlobalHotKeyManager,
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
 };
 use std::sync::mpsc;
 use std::thread;
@@ -55,11 +55,22 @@ impl HotkeyManager {
                 }
 
                 // Check for hotkey events (non-blocking)
-                if let Ok(_event) = event_receiver.try_recv() {
-                    println!(">>> HOTKEY PRESSED! <<<");
-                    log::info!("Hotkey triggered");
-                    if let Err(e) = app_handle.emit("hotkey-triggered", ()) {
-                        log::error!("Failed to emit hotkey event: {}", e);
+                if let Ok(event) = event_receiver.try_recv() {
+                    match event.state {
+                        HotKeyState::Pressed => {
+                            println!(">>> HOTKEY PRESSED! <<<");
+                            log::info!("Hotkey pressed - start recording");
+                            if let Err(e) = app_handle.emit("hotkey-pressed", ()) {
+                                log::error!("Failed to emit hotkey-pressed event: {}", e);
+                            }
+                        }
+                        HotKeyState::Released => {
+                            println!(">>> HOTKEY RELEASED! <<<");
+                            log::info!("Hotkey released - stop recording");
+                            if let Err(e) = app_handle.emit("hotkey-released", ()) {
+                                log::error!("Failed to emit hotkey-released event: {}", e);
+                            }
+                        }
                     }
                 }
 

@@ -59,7 +59,7 @@ pub async fn transcribe_and_insert(
         &config.azure.speech_key,
         &config.azure.speech_region,
         &config.language.speech_language,
-        3, // max retries
+        2, // max retries (1 initial + 1 retry)
     )
     .await?;
 

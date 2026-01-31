@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { X } from 'lucide-react';
 import { Waveform } from './Waveform';
+import { IdleAnimation } from './IdleAnimation';
 import { StatusIndicator } from './StatusIndicator';
 import { useAudioRecording } from '../../hooks/useAudioRecording';
 import { useAppStore } from '../../store/appStore';
@@ -11,37 +12,51 @@ import { useAppStore } from '../../store/appStore';
 export const FloatingWindow: React.FC = () => {
   const { recordingState } = useAppStore();
   const { startRecording, stopRecording } = useAudioRecording();
-  const isRecordingRef = useRef(false);
+  const recordingStateRef = useRef(recordingState);
+  const isProcessingHotkey = useRef(false);
 
-  // Sync isRecordingRef with actual recording state
+  // Keep ref in sync with state
   useEffect(() => {
-    if (recordingState === 'idle' || recordingState === 'error') {
-      isRecordingRef.current = false;
-    } else if (recordingState === 'recording') {
-      isRecordingRef.current = true;
-    }
+    recordingStateRef.current = recordingState;
   }, [recordingState]);
 
   useEffect(() => {
-    // Listen for hotkey events from backend
-    const unlisten = listen('hotkey-triggered', async () => {
-      console.log('Hotkey triggered, current state:', recordingState);
+    // Listen for hotkey press - start recording
+    const unlistenPress = listen('hotkey-pressed', async () => {
+      // Prevent multiple hotkey events from being processed simultaneously
+      if (isProcessingHotkey.current) {
+        console.log('Hotkey press ignored - already processing');
+        return;
+      }
 
-      if ((recordingState === 'idle' || recordingState === 'error') && !isRecordingRef.current) {
-        // Start recording (also recovers from error state)
-        isRecordingRef.current = true;
-        await startRecording();
-      } else if (recordingState === 'recording' && isRecordingRef.current) {
-        // Stop recording
-        isRecordingRef.current = false;
+      const currentState = recordingStateRef.current;
+      console.log('Hotkey pressed, current state:', currentState);
+
+      if (currentState === 'idle' || currentState === 'error') {
+        isProcessingHotkey.current = true;
+        try {
+          await startRecording();
+        } finally {
+          isProcessingHotkey.current = false;
+        }
+      }
+    });
+
+    // Listen for hotkey release - stop recording
+    const unlistenRelease = listen('hotkey-released', async () => {
+      const currentState = recordingStateRef.current;
+      console.log('Hotkey released, current state:', currentState);
+
+      if (currentState === 'recording') {
         await stopRecording();
       }
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenPress.then((fn) => fn());
+      unlistenRelease.then((fn) => fn());
     };
-  }, [recordingState, startRecording, stopRecording]);
+  }, [startRecording, stopRecording]);
 
   const handleClick = async () => {
     // Open configuration window
@@ -92,6 +107,7 @@ export const FloatingWindow: React.FC = () => {
       <div className="p-3 h-full flex flex-col gap-2">
         <StatusIndicator />
         {recordingState === 'recording' && <Waveform />}
+        {recordingState === 'idle' && <IdleAnimation />}
       </div>
     </div>
   );

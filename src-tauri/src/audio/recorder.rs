@@ -46,13 +46,20 @@ impl AudioRecorder {
             buffer.clear();
         }
 
-        // Check if already recording
+        // Check if already recording - if so, try to reset
         {
-            let is_recording = self.is_recording.lock().unwrap();
+            let mut is_recording = self.is_recording.lock().unwrap();
             if *is_recording {
-                return Err("Already recording".to_string());
+                log::warn!("start_recording called but is_recording flag is still true - forcing reset");
+                // Force reset the flag - previous recording likely crashed
+                *is_recording = false;
             }
         }
+
+        // Clear any pending stop sender
+        self.stop_sender = None;
+
+        log::info!("Starting recording...");
 
         let buffer = Arc::clone(&self.buffer);
         let is_recording = Arc::clone(&self.is_recording);
@@ -76,6 +83,9 @@ impl AudioRecorder {
                 Some(d) => d,
                 None => {
                     log::error!("No input device available");
+                    if let Ok(mut recording) = is_recording.lock() {
+                        *recording = false;
+                    }
                     return;
                 }
             };
@@ -89,6 +99,9 @@ impl AudioRecorder {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("Failed to get default input config: {}", e);
+                    if let Ok(mut recording) = is_recording.lock() {
+                        *recording = false;
+                    }
                     return;
                 }
             };
@@ -127,6 +140,9 @@ impl AudioRecorder {
                 }
                 sample_format => {
                     log::error!("Unsupported sample format: {}", sample_format);
+                    if let Ok(mut recording) = is_recording.lock() {
+                        *recording = false;
+                    }
                     return;
                 }
             };
@@ -135,12 +151,18 @@ impl AudioRecorder {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Failed to build stream: {}", e);
+                    if let Ok(mut recording) = is_recording.lock() {
+                        *recording = false;
+                    }
                     return;
                 }
             };
 
             if let Err(e) = stream.play() {
                 log::error!("Failed to play stream: {}", e);
+                if let Ok(mut recording) = is_recording.lock() {
+                    *recording = false;
+                }
                 return;
             }
 
@@ -164,6 +186,8 @@ impl AudioRecorder {
     }
 
     pub fn stop_recording(&mut self) -> Result<Vec<u8>, String> {
+        log::info!("stop_recording called");
+
         // Send stop signal
         if let Some(sender) = self.stop_sender.take() {
             let _ = sender.send(());
@@ -175,6 +199,7 @@ impl AudioRecorder {
         // Set recording flag to false
         {
             let mut recording = self.is_recording.lock().unwrap();
+            log::info!("Setting is_recording to false (was: {})", *recording);
             *recording = false;
         }
 

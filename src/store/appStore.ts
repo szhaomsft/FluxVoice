@@ -8,6 +8,7 @@ interface AppStore {
   transcription: string;
   config: AppConfig | null;
   error: string | null;
+  uploadSize: number | null; // Size of audio data being uploaded in bytes
 
   // Actions
   setRecordingState: (state: RecordingState) => void;
@@ -15,6 +16,7 @@ interface AppStore {
   setTranscription: (text: string) => void;
   setConfig: (config: AppConfig) => void;
   setError: (error: string | null) => void;
+  setUploadSize: (size: number | null) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -23,10 +25,12 @@ export const useAppStore = create<AppStore>((set) => ({
   transcription: '',
   config: null,
   error: null,
+  uploadSize: null,
 
   setRecordingState: (state) => set({ recordingState: state }),
   setAudioLevel: (level) => set({ audioLevel: level }),
   setTranscription: (text) => set({ transcription: text }),
   setConfig: (config) => set({ config }),
   setError: (error) => set({ error }),
+  setUploadSize: (size) => set({ uploadSize: size }),
 }));
