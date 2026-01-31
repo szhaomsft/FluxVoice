@@ -1,12 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { useAppStore } from '../store/appStore';
+import { useAppStore, TranscriptionHistoryItem } from '../store/appStore';
 
 const HISTORY_STORAGE_KEY = 'fluxvoice_transcription_history';
-
-interface TranscriptionHistoryItem {
-  text: string;
-  timestamp: number;
-}
 
 export function useTranscriptionHistory() {
   const { transcriptionHistory, addToHistory, clearHistory } = useAppStore();

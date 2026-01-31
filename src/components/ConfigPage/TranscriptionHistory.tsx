@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, Copy, Check, Trash2 } from 'lucide-react';
+import { Clock, Copy, Check, Trash2, Sparkles } from 'lucide-react';
 import { useTranscriptionHistory } from '../../hooks/useTranscriptionHistory';
 
 function formatTimestamp(timestamp: number): string {
@@ -19,13 +19,13 @@ function formatTimestamp(timestamp: number): string {
 
 export const TranscriptionHistory: React.FC = () => {
   const { transcriptionHistory, clearHistory } = useTranscriptionHistory();
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const handleCopy = async (text: string, index: number) => {
+  const handleCopy = async (text: string, key: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 2000);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
     }
@@ -63,31 +63,65 @@ export const TranscriptionHistory: React.FC = () => {
           Clear All
         </button>
       </div>
-      <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-        {transcriptionHistory.map((item, index) => (
+      <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+        {transcriptionHistory.map((item) => (
           <div
             key={item.timestamp}
-            className="group flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
           >
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-gray-900 dark:text-gray-100 break-words">
-                {item.text}
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                {formatTimestamp(item.timestamp)}
-              </p>
+            {/* Original transcription */}
+            <div className="group flex items-start gap-3 mb-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Original</span>
+                </div>
+                <p className="text-sm text-gray-700 dark:text-gray-300 break-words">
+                  {item.original}
+                </p>
+              </div>
+              <button
+                onClick={() => handleCopy(item.original, `${item.timestamp}-original`)}
+                className="flex-shrink-0 p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                title="Copy original"
+              >
+                {copiedKey === `${item.timestamp}-original` ? (
+                  <Check className="w-4 h-4 text-green-500" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
             </div>
-            <button
-              onClick={() => handleCopy(item.text, index)}
-              className="flex-shrink-0 p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
-              title="Copy to clipboard"
-            >
-              {copiedIndex === index ? (
-                <Check className="w-4 h-4 text-green-500" />
-              ) : (
-                <Copy className="w-4 h-4" />
-              )}
-            </button>
+
+            {/* Polished transcription (if available) */}
+            {item.polished && item.polished !== item.original && (
+              <div className="group flex items-start gap-3 pt-2 border-t border-gray-200 dark:border-gray-600">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles className="w-3 h-3 text-amber-500" />
+                    <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Polished</span>
+                  </div>
+                  <p className="text-sm text-gray-900 dark:text-gray-100 break-words">
+                    {item.polished}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleCopy(item.polished!, `${item.timestamp}-polished`)}
+                  className="flex-shrink-0 p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Copy polished"
+                >
+                  {copiedKey === `${item.timestamp}-polished` ? (
+                    <Check className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Timestamp */}
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              {formatTimestamp(item.timestamp)}
+            </p>
           </div>
         ))}
       </div>

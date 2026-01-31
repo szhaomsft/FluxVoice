@@ -125,14 +125,18 @@ export function useAudioRecording() {
 
     // Step 2: Transcribe (can fail independently)
     try {
-      const result = await invoke<string>('transcribe_and_insert', {
+      const result = await invoke<{
+        original: string;
+        polished: string | null;
+        final_text: string;
+      }>('transcribe_and_insert', {
         audioData,
       });
 
-      setTranscription(result);
+      setTranscription(result.final_text);
       // Add to history if we got a result
-      if (result && result.trim()) {
-        addToHistory(result);
+      if (result.final_text && result.final_text.trim()) {
+        addToHistory(result.original, result.polished, result.final_text);
       }
       setRecordingState('idle');
       setAudioLevel(0);

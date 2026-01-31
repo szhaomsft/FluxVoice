@@ -5,10 +5,18 @@ use crate::input::TextInjector;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::State;
+use serde::Serialize;
 
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TranscriptionResult {
+    pub original: String,
+    pub polished: Option<String>,
+    pub final_text: String,
 }
 
 #[tauri::command]
@@ -44,7 +52,7 @@ pub async fn transcribe_and_insert(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     audio_data: Vec<u8>,
-) -> Result<String, String> {
+) -> Result<TranscriptionResult, String> {
     // Load config
     let config = store::load_config(&app)?;
 
@@ -66,10 +74,12 @@ pub async fn transcribe_and_insert(
     log::info!("Transcription: {}", transcript);
 
     // Optionally polish text
-    let final_text = if config.features.text_polishing_enabled
+    let (final_text, polished) = if config.features.text_polishing_enabled
         && !config.azure.openai_key.is_empty()
         && !config.azure.openai_endpoint.is_empty()
     {
+        log::info!(">>> Text polishing ENABLED - calling Azure OpenAI...");
+        println!(">>> Text polishing ENABLED - calling Azure OpenAI...");
         match openai::polish_text(
             &transcript,
             &config.azure.openai_endpoint,
@@ -78,17 +88,21 @@ pub async fn transcribe_and_insert(
         )
         .await
         {
-            Ok(polished) => {
-                log::info!("Polished text: {}", polished);
-                polished
+            Ok(polished_text) => {
+                log::info!(">>> Polished text: {}", polished_text);
+                println!(">>> Polished text: {}", polished_text);
+                (polished_text.clone(), Some(polished_text))
             }
             Err(e) => {
-                log::warn!("Failed to polish text: {}. Using original transcript.", e);
-                transcript.clone()
+                log::warn!(">>> Failed to polish text: {}. Using original transcript.", e);
+                println!(">>> Failed to polish text: {}. Using original.", e);
+                (transcript.clone(), None)
             }
         }
     } else {
-        transcript.clone()
+        log::info!(">>> Text polishing DISABLED or not configured");
+        println!(">>> Text polishing DISABLED or not configured");
+        (transcript.clone(), None)
     };
 
     // Insert into active window if enabled
@@ -97,7 +111,11 @@ pub async fn transcribe_and_insert(
         injector.inject_text(&final_text)?;
     }
 
-    Ok(final_text)
+    Ok(TranscriptionResult {
+        original: transcript,
+        polished,
+        final_text,
+    })
 }
 
 #[tauri::command]

@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import type { AppConfig, RecordingState } from '../types/config';
 
-interface TranscriptionHistoryItem {
-  text: string;
+export interface TranscriptionHistoryItem {
+  original: string;
+  polished: string | null;
+  finalText: string;
   timestamp: number;
 }
 
@@ -27,7 +29,7 @@ interface AppStore {
   setUploadSize: (size: number | null) => void;
   setRecordingStartTime: (time: number | null) => void;
   setRecordingDuration: (duration: number) => void;
-  addToHistory: (text: string) => void;
+  addToHistory: (original: string, polished: string | null, finalText: string) => void;
   clearHistory: () => void;
 }
 
@@ -52,10 +54,10 @@ export const useAppStore = create<AppStore>((set) => ({
   setUploadSize: (size) => set({ uploadSize: size }),
   setRecordingStartTime: (time) => set({ recordingStartTime: time }),
   setRecordingDuration: (duration) => set({ recordingDuration: duration }),
-  addToHistory: (text) =>
+  addToHistory: (original, polished, finalText) =>
     set((state) => ({
       transcriptionHistory: [
-        { text, timestamp: Date.now() },
+        { original, polished, finalText, timestamp: Date.now() },
         ...state.transcriptionHistory,
       ].slice(0, MAX_HISTORY_ITEMS),
     })),
