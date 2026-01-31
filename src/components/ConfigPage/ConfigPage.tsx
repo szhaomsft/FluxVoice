@@ -3,6 +3,7 @@ import { Button } from '../common/Button';
 import { Input } from '../common/Input';
 import { Toggle } from '../common/Toggle';
 import { useConfig } from '../../hooks/useConfig';
+import { TranscriptionHistory } from './TranscriptionHistory';
 import type { AppConfig } from '../../types/config';
 
 export const ConfigPage: React.FC = () => {
@@ -221,6 +222,9 @@ export const ConfigPage: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Transcription History */}
+          <TranscriptionHistory />
 
           {/* Save Button */}
           <div className="flex justify-end gap-4 mt-8">

@@ -2,10 +2,13 @@ import { useEffect } from 'react';
 import { FloatingWindow } from './components/FloatingWindow/FloatingWindow';
 import { ConfigPage } from './components/ConfigPage/ConfigPage';
 import { useConfig } from './hooks/useConfig';
+import { useTranscriptionHistory } from './hooks/useTranscriptionHistory';
 import './App.css';
 
 function App() {
   const { config } = useConfig();
+  // Initialize transcription history persistence
+  useTranscriptionHistory();
 
   useEffect(() => {
     // Apply theme

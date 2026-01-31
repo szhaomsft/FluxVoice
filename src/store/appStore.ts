@@ -28,6 +28,7 @@ interface AppStore {
   setRecordingStartTime: (time: number | null) => void;
   setRecordingDuration: (duration: number) => void;
   addToHistory: (text: string) => void;
+  clearHistory: () => void;
 }
 
 const MAX_HISTORY_ITEMS = 20;
@@ -58,4 +59,5 @@ export const useAppStore = create<AppStore>((set) => ({
         ...state.transcriptionHistory,
       ].slice(0, MAX_HISTORY_ITEMS),
     })),
+  clearHistory: () => set({ transcriptionHistory: [] }),
 }));
