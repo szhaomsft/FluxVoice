@@ -40,11 +40,10 @@ export const TranscriptionHistory: React.FC = () => {
   if (transcriptionHistory.length === 0) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ padding: '24px 32px' }}>
-        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Transcription History</h2>
-        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-          <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>No transcriptions yet</p>
-          <p className="text-sm mt-1">Your recent transcriptions will appear here</p>
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+          <Clock className="w-16 h-16 mx-auto mb-4 opacity-50" />
+          <p className="text-lg font-medium">No transcriptions yet</p>
+          <p className="text-sm mt-2">Your recent transcriptions will appear here</p>
         </div>
       </div>
     );
@@ -53,16 +52,18 @@ export const TranscriptionHistory: React.FC = () => {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ padding: '24px 32px' }}>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Transcription History</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {transcriptionHistory.length} transcription{transcriptionHistory.length !== 1 ? 's' : ''}
+        </p>
         <button
           onClick={handleClearHistory}
           className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
         >
           <Trash2 className="w-4 h-4" />
-          Clear
+          Clear All
         </button>
       </div>
-      <div className="space-y-3 max-h-96 overflow-y-auto">
+      <div className="space-y-3 max-h-[60vh] overflow-y-auto">
         {transcriptionHistory.map((item, index) => (
           <div
             key={item.timestamp}
