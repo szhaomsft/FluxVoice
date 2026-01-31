@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-flux-primary: #6366f1;
+  --color-flux-secondary: #8b5cf6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Allow scrolling in config window, hide in floating window */
+body.config-page {
+  overflow: auto;
+}
+
+body:not(.config-page) {
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
