@@ -35,7 +35,6 @@ pub struct TranscriptionHistoryItem {
 const HISTORY_STORE_FILE: &str = "history.json";
 const STATS_STORE_FILE: &str = "stats.json";
 const WINDOW_STORE_FILE: &str = "window.json";
-const MAX_HISTORY_ITEMS: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DailyStats {
@@ -210,9 +209,6 @@ pub async fn save_history_item(
 
     // Add new item at the beginning
     history.insert(0, item);
-
-    // Limit to MAX_HISTORY_ITEMS
-    history.truncate(MAX_HISTORY_ITEMS);
 
     // Save back
     let history_value = serde_json::to_value(&history)

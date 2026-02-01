@@ -1,43 +1,90 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check, X } from 'lucide-react';
 
-// Azure Speech Service supported languages
-// https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support
-const AVAILABLE_LANGUAGES = [
-  { code: 'en-US', name: 'English (US)' },
-  { code: 'en-GB', name: 'English (UK)' },
-  { code: 'en-AU', name: 'English (Australia)' },
-  { code: 'zh-CN', name: '中文 (简体)' },
-  { code: 'zh-TW', name: '中文 (繁體)' },
-  { code: 'zh-HK', name: '中文 (香港)' },
-  { code: 'ja-JP', name: '日本語' },
-  { code: 'ko-KR', name: '한국어' },
-  { code: 'es-ES', name: 'Español (España)' },
-  { code: 'es-MX', name: 'Español (México)' },
-  { code: 'fr-FR', name: 'Français (France)' },
-  { code: 'fr-CA', name: 'Français (Canada)' },
-  { code: 'de-DE', name: 'Deutsch' },
-  { code: 'it-IT', name: 'Italiano' },
-  { code: 'pt-BR', name: 'Português (Brasil)' },
-  { code: 'pt-PT', name: 'Português (Portugal)' },
-  { code: 'ru-RU', name: 'Русский' },
-  { code: 'ar-SA', name: 'العربية' },
-  { code: 'hi-IN', name: 'हिन्दी' },
-  { code: 'th-TH', name: 'ไทย' },
-  { code: 'vi-VN', name: 'Tiếng Việt' },
-  { code: 'nl-NL', name: 'Nederlands' },
-  { code: 'pl-PL', name: 'Polski' },
-  { code: 'tr-TR', name: 'Türkçe' },
-  { code: 'sv-SE', name: 'Svenska' },
-  { code: 'da-DK', name: 'Dansk' },
-  { code: 'nb-NO', name: 'Norsk' },
-  { code: 'fi-FI', name: 'Suomi' },
-  { code: 'cs-CZ', name: 'Čeština' },
-  { code: 'el-GR', name: 'Ελληνικά' },
-  { code: 'he-IL', name: 'עברית' },
-  { code: 'id-ID', name: 'Bahasa Indonesia' },
-  { code: 'ms-MY', name: 'Bahasa Melayu' },
-  { code: 'uk-UA', name: 'Українська' },
+// Azure Speech Service Fast Transcription supported locales
+// https://learn.microsoft.com/en-us/azure/ai-services/speech-service/fast-transcription-create
+const AVAILABLE_LOCALES = [
+  // English
+  { code: 'en-US', name: 'English', nativeName: 'English (United States)' },
+  { code: 'en-GB', name: 'English', nativeName: 'English (United Kingdom)' },
+  { code: 'en-AU', name: 'English', nativeName: 'English (Australia)' },
+  { code: 'en-CA', name: 'English', nativeName: 'English (Canada)' },
+  { code: 'en-IN', name: 'English', nativeName: 'English (India)' },
+  { code: 'en-IE', name: 'English', nativeName: 'English (Ireland)' },
+  { code: 'en-NZ', name: 'English', nativeName: 'English (New Zealand)' },
+  { code: 'en-SG', name: 'English', nativeName: 'English (Singapore)' },
+  { code: 'en-ZA', name: 'English', nativeName: 'English (South Africa)' },
+  { code: 'en-HK', name: 'English', nativeName: 'English (Hong Kong)' },
+  { code: 'en-PH', name: 'English', nativeName: 'English (Philippines)' },
+  // Chinese
+  { code: 'zh-CN', name: 'Chinese', nativeName: '中文 (简体)' },
+  { code: 'zh-HK', name: 'Chinese', nativeName: '中文 (香港)' },
+  // Spanish
+  { code: 'es-ES', name: 'Spanish', nativeName: 'Español (España)' },
+  { code: 'es-MX', name: 'Spanish', nativeName: 'Español (México)' },
+  { code: 'es-AR', name: 'Spanish', nativeName: 'Español (Argentina)' },
+  { code: 'es-CO', name: 'Spanish', nativeName: 'Español (Colombia)' },
+  { code: 'es-CL', name: 'Spanish', nativeName: 'Español (Chile)' },
+  // French
+  { code: 'fr-FR', name: 'French', nativeName: 'Français (France)' },
+  { code: 'fr-CA', name: 'French', nativeName: 'Français (Canada)' },
+  // German
+  { code: 'de-DE', name: 'German', nativeName: 'Deutsch (Deutschland)' },
+  { code: 'de-AT', name: 'German', nativeName: 'Deutsch (Österreich)' },
+  { code: 'de-CH', name: 'German', nativeName: 'Deutsch (Schweiz)' },
+  // Japanese & Korean
+  { code: 'ja-JP', name: 'Japanese', nativeName: '日本語 (日本)' },
+  { code: 'ko-KR', name: 'Korean', nativeName: '한국어 (대한민국)' },
+  // Portuguese
+  { code: 'pt-BR', name: 'Portuguese', nativeName: 'Português (Brasil)' },
+  { code: 'pt-PT', name: 'Portuguese', nativeName: 'Português (Portugal)' },
+  // Italian & Russian
+  { code: 'it-IT', name: 'Italian', nativeName: 'Italiano (Italia)' },
+  { code: 'ru-RU', name: 'Russian', nativeName: 'Русский (Россия)' },
+  // Arabic
+  { code: 'ar-SA', name: 'Arabic', nativeName: 'العربية (السعودية)' },
+  { code: 'ar-EG', name: 'Arabic', nativeName: 'العربية (مصر)' },
+  { code: 'ar-AE', name: 'Arabic', nativeName: 'العربية (الإمارات)' },
+  // South Asian
+  { code: 'hi-IN', name: 'Hindi', nativeName: 'हिन्दी (भारत)' },
+  { code: 'bn-IN', name: 'Bengali', nativeName: 'বাংলা (ভারত)' },
+  { code: 'ta-IN', name: 'Tamil', nativeName: 'தமிழ் (இந்தியா)' },
+  { code: 'te-IN', name: 'Telugu', nativeName: 'తెలుగు (భారతదేశం)' },
+  { code: 'mr-IN', name: 'Marathi', nativeName: 'मराठी (भारत)' },
+  { code: 'gu-IN', name: 'Gujarati', nativeName: 'ગુજરાતી (ભારત)' },
+  { code: 'kn-IN', name: 'Kannada', nativeName: 'ಕನ್ನಡ (ಭಾರತ)' },
+  { code: 'ml-IN', name: 'Malayalam', nativeName: 'മലയാളം (ഇന്ത്യ)' },
+  // Southeast Asian
+  { code: 'th-TH', name: 'Thai', nativeName: 'ไทย (ประเทศไทย)' },
+  { code: 'vi-VN', name: 'Vietnamese', nativeName: 'Tiếng Việt (Việt Nam)' },
+  { code: 'id-ID', name: 'Indonesian', nativeName: 'Bahasa Indonesia (Indonesia)' },
+  { code: 'ms-MY', name: 'Malay', nativeName: 'Bahasa Melayu (Malaysia)' },
+  { code: 'fil-PH', name: 'Filipino', nativeName: 'Filipino (Pilipinas)' },
+  // European
+  { code: 'tr-TR', name: 'Turkish', nativeName: 'Türkçe (Türkiye)' },
+  { code: 'pl-PL', name: 'Polish', nativeName: 'Polski (Polska)' },
+  { code: 'nl-NL', name: 'Dutch', nativeName: 'Nederlands (Nederland)' },
+  { code: 'sv-SE', name: 'Swedish', nativeName: 'Svenska (Sverige)' },
+  { code: 'da-DK', name: 'Danish', nativeName: 'Dansk (Danmark)' },
+  { code: 'fi-FI', name: 'Finnish', nativeName: 'Suomi (Suomi)' },
+  { code: 'nb-NO', name: 'Norwegian', nativeName: 'Norsk Bokmål (Norge)' },
+  { code: 'cs-CZ', name: 'Czech', nativeName: 'Čeština (Česká republika)' },
+  { code: 'hu-HU', name: 'Hungarian', nativeName: 'Magyar (Magyarország)' },
+  { code: 'ro-RO', name: 'Romanian', nativeName: 'Română (România)' },
+  { code: 'el-GR', name: 'Greek', nativeName: 'Ελληνικά (Ελλάδα)' },
+  { code: 'bg-BG', name: 'Bulgarian', nativeName: 'Български (България)' },
+  { code: 'hr-HR', name: 'Croatian', nativeName: 'Hrvatski (Hrvatska)' },
+  { code: 'sk-SK', name: 'Slovak', nativeName: 'Slovenčina (Slovensko)' },
+  { code: 'sl-SI', name: 'Slovenian', nativeName: 'Slovenščina (Slovenija)' },
+  { code: 'et-EE', name: 'Estonian', nativeName: 'Eesti (Eesti)' },
+  { code: 'lv-LV', name: 'Latvian', nativeName: 'Latviešu (Latvija)' },
+  { code: 'lt-LT', name: 'Lithuanian', nativeName: 'Lietuvių (Lietuva)' },
+  { code: 'uk-UA', name: 'Ukrainian', nativeName: 'Українська (Україна)' },
+  // Other
+  { code: 'he-IL', name: 'Hebrew', nativeName: 'עברית (ישראל)' },
+  { code: 'fa-IR', name: 'Persian', nativeName: 'فارسی (ایران)' },
+  { code: 'af-ZA', name: 'Afrikaans', nativeName: 'Afrikaans (Suid-Afrika)' },
+  { code: 'ca-ES', name: 'Catalan', nativeName: 'Català (Espanya)' },
 ];
 
 interface LanguageSelectorProps {
@@ -82,7 +129,8 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   };
 
   const getLanguageName = (code: string) => {
-    return AVAILABLE_LANGUAGES.find((l) => l.code === code)?.name || code;
+    const locale = AVAILABLE_LOCALES.find((l) => l.code === code);
+    return locale?.nativeName || code;
   };
 
   return (
@@ -120,7 +168,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
 
       {isOpen && (
         <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-          {AVAILABLE_LANGUAGES.map((lang) => (
+          {AVAILABLE_LOCALES.map((lang) => (
             <div
               key={lang.code}
               onClick={() => toggleLanguage(lang.code)}
@@ -131,7 +179,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
               }`}
             >
               <span className="text-gray-900 dark:text-gray-100">
-                {lang.name}
+                {lang.nativeName}
                 <span className="text-gray-400 dark:text-gray-500 text-sm ml-2">
                   ({lang.code})
                 </span>

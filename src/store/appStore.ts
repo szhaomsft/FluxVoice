@@ -34,8 +34,6 @@ interface AppStore {
   clearHistory: () => void;
 }
 
-const MAX_HISTORY_ITEMS = 20;
-
 export const useAppStore = create<AppStore>((set) => ({
   recordingState: 'idle',
   audioLevel: 0,
@@ -60,7 +58,7 @@ export const useAppStore = create<AppStore>((set) => ({
       transcriptionHistory: [
         { original, polished, finalText, timestamp: timestamp ?? Date.now(), audioData },
         ...state.transcriptionHistory,
-      ].slice(0, MAX_HISTORY_ITEMS),
+      ],
     })),
   clearHistory: () => set({ transcriptionHistory: [] }),
 }));
