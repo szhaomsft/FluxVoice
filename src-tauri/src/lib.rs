@@ -95,6 +95,8 @@ pub fn run() {
             commands::save_history_item,
             commands::load_history,
             commands::clear_history,
+            commands::update_stats,
+            commands::get_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

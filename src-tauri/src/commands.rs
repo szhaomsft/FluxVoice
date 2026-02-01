@@ -33,7 +33,24 @@ pub struct TranscriptionHistoryItem {
 }
 
 const HISTORY_STORE_FILE: &str = "history.json";
+const STATS_STORE_FILE: &str = "stats.json";
 const MAX_HISTORY_ITEMS: usize = 20;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DailyStats {
+    pub date: String,           // YYYY-MM-DD format
+    pub transcription_count: u32,
+    pub total_characters: u32,
+    pub total_duration_secs: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UsageStats {
+    pub total_transcriptions: u32,
+    pub total_characters: u32,
+    pub total_duration_secs: f32,
+    pub daily_stats: Vec<DailyStats>,  // Last 30 days
+}
 
 #[tauri::command]
 pub async fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
@@ -251,4 +268,97 @@ pub async fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
     log::info!("History cleared");
 
     Ok(())
+}
+
+fn get_today_date() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Simple date calculation (not accounting for timezones perfectly, but good enough)
+    let days = secs / 86400;
+    let year = 1970 + (days / 365); // Approximate
+    let day_of_year = days % 365;
+    let month = day_of_year / 30 + 1;
+    let day = day_of_year % 30 + 1;
+    format!("{:04}-{:02}-{:02}", year, month.min(12), day.min(31))
+}
+
+#[tauri::command]
+pub async fn update_stats(
+    app: tauri::AppHandle,
+    characters: u32,
+    duration_secs: f32,
+) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(STATS_STORE_FILE)
+        .map_err(|e| format!("Failed to open stats store: {}", e))?;
+
+    // Load existing stats
+    let mut stats: UsageStats = store
+        .get("stats")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    // Update totals
+    stats.total_transcriptions += 1;
+    stats.total_characters += characters;
+    stats.total_duration_secs += duration_secs;
+
+    // Update daily stats
+    let today = get_today_date();
+    if let Some(daily) = stats.daily_stats.iter_mut().find(|d| d.date == today) {
+        daily.transcription_count += 1;
+        daily.total_characters += characters;
+        daily.total_duration_secs += duration_secs;
+    } else {
+        stats.daily_stats.push(DailyStats {
+            date: today,
+            transcription_count: 1,
+            total_characters: characters,
+            total_duration_secs: duration_secs,
+        });
+    }
+
+    // Keep only last 30 days
+    if stats.daily_stats.len() > 30 {
+        stats.daily_stats = stats.daily_stats.into_iter().rev().take(30).rev().collect();
+    }
+
+    // Save back
+    let stats_value = serde_json::to_value(&stats)
+        .map_err(|e| format!("Failed to serialize stats: {}", e))?;
+
+    store.set("stats", stats_value);
+
+    store
+        .save()
+        .map_err(|e| format!("Failed to save stats store: {}", e))?;
+
+    log::info!(
+        "Stats updated: {} transcriptions, {} chars total",
+        stats.total_transcriptions,
+        stats.total_characters
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_stats(app: tauri::AppHandle) -> Result<UsageStats, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(STATS_STORE_FILE)
+        .map_err(|e| format!("Failed to open stats store: {}", e))?;
+
+    let stats: UsageStats = store
+        .get("stats")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    Ok(stats)
 }

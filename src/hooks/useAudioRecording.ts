@@ -30,6 +30,7 @@ function playStartSound() {
 
 export function useAudioRecording() {
   const {
+    recordingDuration,
     setRecordingState,
     setAudioLevel,
     setTranscription,
@@ -115,6 +116,9 @@ export function useAudioRecording() {
     }
     isOperationInProgress = true;
 
+    // Capture recording duration before clearing
+    const capturedDuration = recordingDuration;
+
     // Always clear intervals first
     if (intervalId) {
       clearInterval(intervalId);
@@ -183,6 +187,16 @@ export function useAudioRecording() {
         } catch (err) {
           console.error('Failed to save history item to backend:', err);
         }
+        // Update usage stats
+        try {
+          await invoke('update_stats', {
+            characters: result.final_text.length,
+            durationSecs: capturedDuration,
+          });
+          console.log('Stats updated');
+        } catch (err) {
+          console.error('Failed to update stats:', err);
+        }
       }
       setRecordingState('idle');
       setAudioLevel(0);
@@ -200,7 +214,7 @@ export function useAudioRecording() {
     } finally {
       isOperationInProgress = false;
     }
-  }, [intervalId, durationIntervalId, setRecordingState, setTranscription, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration, addToHistory]);
+  }, [intervalId, durationIntervalId, recordingDuration, setRecordingState, setTranscription, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration, addToHistory]);
 
   // Reset function to clear state after error recovery
   const resetState = useCallback(() => {

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Clock } from 'lucide-react';
+import { Settings, Clock, BarChart3 } from 'lucide-react';
 import { Button } from '../common/Button';
 import { Input } from '../common/Input';
 import { Toggle } from '../common/Toggle';
 import { useConfig } from '../../hooks/useConfig';
 import { TranscriptionHistory } from './TranscriptionHistory';
+import { UsageStats } from './UsageStats';
 import type { AppConfig } from '../../types/config';
 
-type TabType = 'settings' | 'history';
+type TabType = 'settings' | 'history' | 'stats';
 
 export const ConfigPage: React.FC = () => {
   const { config, saveConfig } = useConfig();
@@ -81,6 +82,17 @@ export const ConfigPage: React.FC = () => {
           >
             <Clock className="w-4 h-4" />
             History
+          </button>
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              activeTab === 'stats'
+                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            Stats
           </button>
         </div>
 
@@ -279,6 +291,9 @@ export const ConfigPage: React.FC = () => {
 
         {/* History Tab */}
         {activeTab === 'history' && <TranscriptionHistory />}
+
+        {/* Stats Tab */}
+        {activeTab === 'stats' && <UsageStats />}
       </div>
     </div>
   );
