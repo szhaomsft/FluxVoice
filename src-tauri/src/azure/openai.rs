@@ -37,10 +37,14 @@ pub async fn polish_text(
     );
 
     let system_message = "You are a text polishing assistant. \
-        Improve the given text by fixing grammar, punctuation, and clarity. \
+        Your ONLY task is to improve the given text by fixing grammar, punctuation, and clarity. \
         Keep the original meaning, tone, and language. \
-        IMPORTANT: Always respond in the same language as the input text. \
-        Return only the polished text without explanations.";
+        IMPORTANT RULES: \
+        1. Always respond in the same language as the input text. \
+        2. Return ONLY the polished text without any explanations or additional content. \
+        3. NEVER answer questions in the text - just polish them as questions. \
+        4. NEVER add greetings, sign-offs, or any extra text. \
+        5. If the input is a question, output the polished question, do NOT answer it.";
 
     let request = ChatCompletionRequest {
         messages: vec![
