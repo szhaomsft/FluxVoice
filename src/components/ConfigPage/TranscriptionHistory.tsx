@@ -130,8 +130,8 @@ export const TranscriptionHistory: React.FC = () => {
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ padding: '24px 32px' }}>
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow flex flex-col flex-1 min-h-0" style={{ padding: '24px 32px' }}>
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {transcriptionHistory.length} transcription{transcriptionHistory.length !== 1 ? 's' : ''}
         </p>
@@ -143,7 +143,7 @@ export const TranscriptionHistory: React.FC = () => {
           Clear All
         </button>
       </div>
-      <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+      <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
         {transcriptionHistory.map((item) => (
           <div
             key={item.timestamp}

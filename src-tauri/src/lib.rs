@@ -33,6 +33,31 @@ pub fn run() {
 
             app.manage(AppState { recorder, injector });
 
+            // Position main window
+            if let Some(window) = app.get_webview_window("main") {
+                let app_handle_pos = app.handle().clone();
+                let window_clone = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Try to load saved position
+                    if let Ok(Some(pos)) = commands::load_window_position(app_handle_pos).await {
+                        println!("Restoring window position: ({}, {})", pos.x, pos.y);
+                        let _ = window_clone.set_position(tauri::PhysicalPosition::new(pos.x, pos.y));
+                    } else {
+                        // Default to bottom-right corner
+                        if let Ok(Some(monitor)) = window_clone.current_monitor() {
+                            let monitor_size = monitor.size();
+                            let window_size = window_clone.outer_size().unwrap_or(tauri::PhysicalSize::new(300, 100));
+                            let x = monitor_size.width as i32 - window_size.width as i32 - 20;
+                            let y = monitor_size.height as i32 - window_size.height as i32 - 60;
+                            println!("Setting default window position: ({}, {})", x, y);
+                            let _ = window_clone.set_position(tauri::PhysicalPosition::new(x, y));
+                        }
+                    }
+                    // Show window after positioning
+                    let _ = window_clone.show();
+                });
+            }
+
             // Register initial hotkey
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -97,6 +122,8 @@ pub fn run() {
             commands::clear_history,
             commands::update_stats,
             commands::get_stats,
+            commands::save_window_position,
+            commands::load_window_position,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

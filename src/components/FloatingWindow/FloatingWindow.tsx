@@ -117,9 +117,20 @@ export const FloatingWindow: React.FC = () => {
     }
   };
 
+  const saveWindowPosition = async () => {
+    try {
+      const window = getCurrentWindow();
+      const position = await window.outerPosition();
+      await invoke('save_window_position', { x: position.x, y: position.y });
+    } catch (err) {
+      console.error('Failed to save window position:', err);
+    }
+  };
+
   const handleClose = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
+      await saveWindowPosition();
       await getCurrentWindow().close();
     } catch (err) {
       console.error('Failed to close window:', err);

@@ -34,6 +34,7 @@ pub struct TranscriptionHistoryItem {
 
 const HISTORY_STORE_FILE: &str = "history.json";
 const STATS_STORE_FILE: &str = "stats.json";
+const WINDOW_STORE_FILE: &str = "window.json";
 const MAX_HISTORY_ITEMS: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -361,4 +362,52 @@ pub async fn get_stats(app: tauri::AppHandle) -> Result<UsageStats, String> {
         .unwrap_or_default();
 
     Ok(stats)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[tauri::command]
+pub async fn save_window_position(
+    app: tauri::AppHandle,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(WINDOW_STORE_FILE)
+        .map_err(|e| format!("Failed to open window store: {}", e))?;
+
+    let position = WindowPosition { x, y };
+    let position_value = serde_json::to_value(&position)
+        .map_err(|e| format!("Failed to serialize position: {}", e))?;
+
+    store.set("position", position_value);
+
+    store
+        .save()
+        .map_err(|e| format!("Failed to save window store: {}", e))?;
+
+    log::info!("Window position saved: ({}, {})", x, y);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn load_window_position(app: tauri::AppHandle) -> Result<Option<WindowPosition>, String> {
+    use tauri_plugin_store::StoreExt;
+
+    let store = app
+        .store(WINDOW_STORE_FILE)
+        .map_err(|e| format!("Failed to open window store: {}", e))?;
+
+    let position: Option<WindowPosition> = store
+        .get("position")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+    Ok(position)
 }

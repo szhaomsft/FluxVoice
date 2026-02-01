@@ -55,12 +55,12 @@ export const ConfigPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900" style={{ padding: '40px 48px' }}>
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-gray-900 dark:text-white">FluxVoice</h1>
+    <div className="h-screen bg-gray-50 dark:bg-gray-900 flex flex-col" style={{ padding: '40px 48px' }}>
+      <div className="max-w-4xl mx-auto w-full flex flex-col flex-1 min-h-0">
+        <h1 className="text-3xl font-bold mb-6 text-gray-900 dark:text-white flex-shrink-0">FluxVoice</h1>
 
         {/* Tab Navigation */}
-        <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
           <button
             onClick={() => setActiveTab('settings')}
             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
@@ -98,7 +98,7 @@ export const ConfigPage: React.FC = () => {
 
         {/* Settings Tab */}
         {activeTab === 'settings' && (
-          <>
+          <div className="flex-1 overflow-y-auto min-h-0">
             <div className="space-y-6">
             {/* Azure Settings */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ padding: '24px 32px' }}>
@@ -286,14 +286,22 @@ export const ConfigPage: React.FC = () => {
               {isSaving ? 'Saving...' : 'Save Configuration'}
             </Button>
           </div>
-          </>
+          </div>
         )}
 
         {/* History Tab */}
-        {activeTab === 'history' && <TranscriptionHistory />}
+        {activeTab === 'history' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            <TranscriptionHistory />
+          </div>
+        )}
 
         {/* Stats Tab */}
-        {activeTab === 'stats' && <UsageStats />}
+        {activeTab === 'stats' && (
+          <div className="flex-1 overflow-y-auto min-h-0">
+            <UsageStats />
+          </div>
+        )}
       </div>
     </div>
   );

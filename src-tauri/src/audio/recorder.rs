@@ -45,6 +45,7 @@ impl AudioRecorder {
             let is_recording = self.is_recording.lock().unwrap();
             if *is_recording {
                 log::warn!("start_recording called but already recording - stopping previous recording first");
+                println!(">>> WARN: start_recording called but already recording");
                 drop(is_recording); // Release lock before stopping
 
                 // Send stop signal to previous recording
@@ -64,13 +65,17 @@ impl AudioRecorder {
         // Clear previous buffer
         {
             let mut buffer = self.buffer.lock().unwrap();
+            let prev_len = buffer.len();
             buffer.clear();
+            log::info!("Cleared previous buffer ({} samples)", prev_len);
+            println!(">>> Cleared previous buffer ({} samples)", prev_len);
         }
 
         // Clear any pending stop sender
         self.stop_sender = None;
 
         log::info!("Starting recording...");
+        println!(">>> Starting recording...");
 
         let buffer = Arc::clone(&self.buffer);
         let is_recording = Arc::clone(&self.is_recording);
@@ -81,6 +86,8 @@ impl AudioRecorder {
         {
             let mut recording = is_recording.lock().unwrap();
             *recording = true;
+            log::info!("Recording flag set to true");
+            println!(">>> Recording flag set to true");
         }
 
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
@@ -89,11 +96,17 @@ impl AudioRecorder {
         // Spawn a dedicated thread for audio recording
         // This avoids the Send requirement since the Stream stays in this thread
         thread::spawn(move || {
+            println!(">>> Recording thread started");
+            log::info!("Recording thread started");
+
             let host = cpal::default_host();
+            println!(">>> Audio host: {:?}", host.id());
+
             let device = match host.default_input_device() {
                 Some(d) => d,
                 None => {
                     log::error!("No input device available");
+                    println!(">>> ERROR: No input device available");
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
@@ -101,15 +114,15 @@ impl AudioRecorder {
                 }
             };
 
-            log::info!(
-                "Using audio input device: {}",
-                device.name().unwrap_or_else(|_| "Unknown".to_string())
-            );
+            let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+            log::info!("Using audio input device: {}", device_name);
+            println!(">>> Using audio input device: {}", device_name);
 
             let supported_config = match device.default_input_config() {
                 Ok(c) => c,
                 Err(e) => {
                     log::error!("Failed to get default input config: {}", e);
+                    println!(">>> ERROR: Failed to get default input config: {}", e);
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
@@ -134,23 +147,35 @@ impl AudioRecorder {
                 config.channels,
                 supported_config.sample_format()
             );
+            println!(
+                ">>> Audio config: {} Hz, {} channels, format: {:?}",
+                config.sample_rate.0,
+                config.channels,
+                supported_config.sample_format()
+            );
 
             let err_fn = |err| {
                 log::error!("Stream error: {}", err);
+                println!(">>> Stream error: {}", err);
             };
+
+            let buffer_for_callback = buffer.clone();
+            let sample_counter = Arc::new(StdMutex::new(0usize));
+            let sample_counter_for_callback = sample_counter.clone();
 
             let stream = match supported_config.sample_format() {
                 SampleFormat::F32 => {
-                    build_stream::<f32>(&device, &config, buffer.clone(), err_fn)
+                    build_stream_with_logging::<f32>(&device, &config, buffer_for_callback, sample_counter_for_callback, err_fn)
                 }
                 SampleFormat::I16 => {
-                    build_stream::<i16>(&device, &config, buffer.clone(), err_fn)
+                    build_stream_with_logging::<i16>(&device, &config, buffer_for_callback, sample_counter_for_callback, err_fn)
                 }
                 SampleFormat::U16 => {
-                    build_stream::<u16>(&device, &config, buffer.clone(), err_fn)
+                    build_stream_with_logging::<u16>(&device, &config, buffer_for_callback, sample_counter_for_callback, err_fn)
                 }
                 sample_format => {
                     log::error!("Unsupported sample format: {}", sample_format);
+                    println!(">>> ERROR: Unsupported sample format: {}", sample_format);
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
@@ -162,6 +187,7 @@ impl AudioRecorder {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Failed to build stream: {}", e);
+                    println!(">>> ERROR: Failed to build stream: {}", e);
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
@@ -171,16 +197,24 @@ impl AudioRecorder {
 
             if let Err(e) = stream.play() {
                 log::error!("Failed to play stream: {}", e);
+                println!(">>> ERROR: Failed to play stream: {}", e);
                 if let Ok(mut recording) = is_recording.lock() {
                     *recording = false;
                 }
                 return;
             }
 
-            log::info!("Recording started");
+            log::info!("Recording started - stream is playing");
+            println!(">>> Recording started - stream is playing");
 
             // Block until we receive the stop signal
             let _ = stop_rx.blocking_recv();
+
+            // Log final sample count
+            if let Ok(count) = sample_counter.lock() {
+                println!(">>> Recording stopping - total samples collected in callbacks: {}", *count);
+                log::info!("Recording stopping - total samples collected in callbacks: {}", *count);
+            }
 
             // Stream is dropped here, stopping the recording
             drop(stream);
@@ -191,6 +225,7 @@ impl AudioRecorder {
             }
 
             log::info!("Recording thread stopped");
+            println!(">>> Recording thread stopped");
         });
 
         Ok(())
@@ -198,10 +233,15 @@ impl AudioRecorder {
 
     pub fn stop_recording(&mut self) -> Result<Vec<u8>, String> {
         log::info!("stop_recording called");
+        println!(">>> stop_recording called");
 
         // Send stop signal
         if let Some(sender) = self.stop_sender.take() {
+            println!(">>> Sending stop signal to recording thread");
             let _ = sender.send(());
+        } else {
+            println!(">>> WARNING: No stop sender available - recording may not have started properly");
+            log::warn!("No stop sender available - recording may not have started properly");
         }
 
         // Wait a bit for the thread to stop
@@ -211,12 +251,14 @@ impl AudioRecorder {
         {
             let mut recording = self.is_recording.lock().unwrap();
             log::info!("Setting is_recording to false (was: {})", *recording);
+            println!(">>> Setting is_recording to false (was: {})", *recording);
             *recording = false;
         }
 
         // Get buffer data and source info
         let buffer_data = {
             let buffer = self.buffer.lock().unwrap();
+            println!(">>> Buffer contains {} samples", buffer.len());
             buffer.clone()
         };
 
@@ -229,9 +271,23 @@ impl AudioRecorder {
             source_rate,
             source_channels
         );
+        println!(
+            ">>> Recording stopped. Captured {} samples at {} Hz, {} channels",
+            buffer_data.len(),
+            source_rate,
+            source_channels
+        );
+
+        // Check if we got any data at all
+        if buffer_data.is_empty() {
+            println!(">>> ERROR: No audio data captured!");
+            log::error!("No audio data captured!");
+            return Err("No audio data captured. Microphone may not be working.".to_string());
+        }
 
         // Convert to mono if needed
         let mono_data: Vec<f32> = if source_channels > 1 {
+            println!(">>> Converting {} channels to mono", source_channels);
             buffer_data
                 .chunks(source_channels as usize)
                 .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32)
@@ -240,20 +296,34 @@ impl AudioRecorder {
             buffer_data
         };
 
+        println!(">>> Mono data: {} samples", mono_data.len());
+
         // Resample to target sample rate if needed
         let resampled = if source_rate != TARGET_SAMPLE_RATE {
+            println!(">>> Resampling from {} Hz to {} Hz", source_rate, TARGET_SAMPLE_RATE);
             resample(&mono_data, source_rate, TARGET_SAMPLE_RATE)
         } else {
             mono_data
         };
 
         log::info!("Resampled to {} samples at {} Hz", resampled.len(), TARGET_SAMPLE_RATE);
+        println!(">>> Resampled to {} samples at {} Hz (duration: {:.2}s)",
+            resampled.len(),
+            TARGET_SAMPLE_RATE,
+            resampled.len() as f32 / TARGET_SAMPLE_RATE as f32
+        );
 
         // Check minimum recording duration (at least 0.5 seconds = 8000 samples at 16kHz)
         const MIN_SAMPLES: usize = 8000;
         if resampled.len() < MIN_SAMPLES {
             log::warn!(
                 "Recording too short: {} samples (minimum {}). Duration: {:.2}s",
+                resampled.len(),
+                MIN_SAMPLES,
+                resampled.len() as f32 / TARGET_SAMPLE_RATE as f32
+            );
+            println!(
+                ">>> WARNING: Recording too short: {} samples (minimum {}). Duration: {:.2}s",
                 resampled.len(),
                 MIN_SAMPLES,
                 resampled.len() as f32 / TARGET_SAMPLE_RATE as f32
@@ -265,7 +335,12 @@ impl AudioRecorder {
         }
 
         // Convert to Opus/OGG format
-        samples_to_opus(&resampled)
+        println!(">>> Encoding to Opus/OGG...");
+        let result = samples_to_opus(&resampled);
+        if let Ok(ref data) = result {
+            println!(">>> Encoded successfully: {} bytes", data.len());
+        }
+        result
     }
 
     pub fn get_audio_level(&self) -> f32 {
@@ -288,24 +363,62 @@ impl AudioRecorder {
     }
 }
 
-fn build_stream<T>(
+fn build_stream_with_logging<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     buffer: Arc<StdMutex<Vec<f32>>>,
+    sample_counter: Arc<StdMutex<usize>>,
     err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> Result<cpal::Stream, String>
 where
     T: cpal::SizedSample,
     f32: cpal::FromSample<T>,
 {
+    use std::time::Instant;
+    let start_time = Instant::now();
+    let last_log = Arc::new(StdMutex::new(Instant::now()));
+    let callback_count = Arc::new(StdMutex::new(0usize));
+
     let stream = device
         .build_input_stream(
             config,
             move |data: &[T], _: &cpal::InputCallbackInfo| {
                 if let Ok(mut buf) = buffer.lock() {
+                    let prev_len = buf.len();
                     // Convert all samples to f32 (keep all channels, we'll convert to mono later)
                     for sample in data {
                         buf.push(f32::from_sample_(*sample));
+                    }
+
+                    // Update sample counter
+                    if let Ok(mut count) = sample_counter.lock() {
+                        *count += data.len();
+                    }
+
+                    // Update callback count
+                    if let Ok(mut count) = callback_count.lock() {
+                        *count += 1;
+                    }
+
+                    // Log periodically (every 1 second)
+                    if let Ok(mut last) = last_log.lock() {
+                        if last.elapsed().as_secs() >= 1 {
+                            let elapsed = start_time.elapsed().as_secs_f32();
+                            let callbacks = callback_count.lock().map(|c| *c).unwrap_or(0);
+                            println!(
+                                ">>> Audio callback: +{} samples, total {} samples, {:.1}s elapsed, {} callbacks",
+                                data.len(),
+                                buf.len(),
+                                elapsed,
+                                callbacks
+                            );
+                            *last = Instant::now();
+                        }
+                    }
+
+                    // Log first callback
+                    if prev_len == 0 && !data.is_empty() {
+                        println!(">>> First audio callback received: {} samples", data.len());
                     }
                 }
             },
@@ -341,6 +454,8 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
 }
 
 fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
+    println!(">>> samples_to_opus: input {} f32 samples", samples.len());
+
     // Create Opus encoder
     let mut encoder = Encoder::new(SampleRate::Hz16000, Channels::Mono, Application::Voip)
         .map_err(|e| format!("Failed to create Opus encoder: {:?}", e))?;
@@ -354,6 +469,13 @@ fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
         .iter()
         .map(|s| (*s * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
         .collect();
+
+    println!(">>> samples_to_opus: converted to {} i16 samples", i16_samples.len());
+
+    // Check if samples are all zeros (silence)
+    let non_zero_count = i16_samples.iter().filter(|&&s| s != 0).count();
+    let max_sample = i16_samples.iter().map(|s| s.abs()).max().unwrap_or(0);
+    println!(">>> samples_to_opus: non-zero samples: {}, max amplitude: {}", non_zero_count, max_sample);
 
     // Create OGG container
     let mut cursor = Cursor::new(Vec::new());
@@ -373,8 +495,13 @@ fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
     // Encode audio in frames
     let mut granule_pos: u64 = 0;
     let mut encoded_buf = vec![0u8; 4000]; // Max Opus packet size
+    let mut frame_count = 0;
+    let mut total_encoded_bytes = 0;
+    let total_frames = (i16_samples.len() + OPUS_FRAME_SIZE - 1) / OPUS_FRAME_SIZE;
 
-    for chunk in i16_samples.chunks(OPUS_FRAME_SIZE) {
+    println!(">>> samples_to_opus: will encode {} frames (OPUS_FRAME_SIZE={})", total_frames, OPUS_FRAME_SIZE);
+
+    for (idx, chunk) in i16_samples.chunks(OPUS_FRAME_SIZE).enumerate() {
         // Pad last frame if needed
         let frame: Vec<i16> = if chunk.len() < OPUS_FRAME_SIZE {
             let mut padded = chunk.to_vec();
@@ -387,10 +514,13 @@ fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
         let encoded_len = encoder.encode(&frame, &mut encoded_buf)
             .map_err(|e| format!("Failed to encode Opus frame: {:?}", e))?;
 
+        frame_count += 1;
+        total_encoded_bytes += encoded_len;
+
         // Granule position is in 48kHz samples (Opus standard), so multiply by 3 (48000/16000)
         granule_pos += (OPUS_FRAME_SIZE as u64) * 3;
 
-        let is_last = chunk.len() < OPUS_FRAME_SIZE;
+        let is_last = idx == total_frames - 1;
         let end_info = if is_last {
             PacketWriteEndInfo::EndStream
         } else {
@@ -405,8 +535,11 @@ fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
         ).map_err(|e| format!("Failed to write Opus packet: {}", e))?;
     }
 
+    println!(">>> samples_to_opus: encoded {} frames, {} bytes of audio data", frame_count, total_encoded_bytes);
+
     let result = cursor.into_inner();
     log::info!("Encoded {} samples to {} bytes Opus/OGG", samples.len(), result.len());
+    println!(">>> samples_to_opus: final OGG file size: {} bytes", result.len());
 
     Ok(result)
 }

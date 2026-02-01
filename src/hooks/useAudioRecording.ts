@@ -46,10 +46,11 @@ export function useAudioRecording() {
   const startRecording = useCallback(async () => {
     // Prevent concurrent operations
     if (isOperationInProgress) {
-      console.log('startRecording blocked - operation in progress');
+      console.log('[useAudioRecording] startRecording blocked - operation in progress');
       return;
     }
     isOperationInProgress = true;
+    console.log('[useAudioRecording] startRecording - starting...');
 
     // Clear any leftover intervals from previous recording
     if (intervalId) {
@@ -73,7 +74,9 @@ export function useAudioRecording() {
       const startTime = Date.now();
       setRecordingStartTime(startTime);
       setRecordingState('recording');
+      console.log('[useAudioRecording] Calling invoke start_recording...');
       await invoke('start_recording');
+      console.log('[useAudioRecording] start_recording returned successfully');
 
       // Start polling audio level for waveform
       const id = window.setInterval(async () => {
@@ -81,7 +84,7 @@ export function useAudioRecording() {
           const level = await invoke<number>('get_audio_level');
           setAudioLevel(level);
         } catch (err) {
-          console.error('Failed to get audio level:', err);
+          console.error('[useAudioRecording] Failed to get audio level:', err);
         }
       }, 50); // Update 20 times per second
 
@@ -95,7 +98,7 @@ export function useAudioRecording() {
 
       setDurationIntervalId(durationId);
     } catch (err) {
-      console.error('Failed to start recording:', err);
+      console.error('[useAudioRecording] Failed to start recording:', err);
       setError(err as string);
       setRecordingState('idle'); // Immediately return to idle so user can retry
       setRecordingStartTime(null);
@@ -105,19 +108,22 @@ export function useAudioRecording() {
       }, 3000);
     } finally {
       isOperationInProgress = false;
+      console.log('[useAudioRecording] startRecording - finished');
     }
   }, [intervalId, durationIntervalId, setRecordingState, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration]);
 
   const stopRecording = useCallback(async () => {
     // Prevent multiple stop calls
     if (isOperationInProgress) {
-      console.log('stopRecording blocked - operation in progress');
+      console.log('[useAudioRecording] stopRecording blocked - operation in progress');
       return;
     }
     isOperationInProgress = true;
+    console.log('[useAudioRecording] stopRecording - starting...');
 
     // Capture recording duration before clearing
     const capturedDuration = recordingDuration;
+    console.log('[useAudioRecording] Captured duration:', capturedDuration, 'seconds');
 
     // Always clear intervals first
     if (intervalId) {
@@ -136,13 +142,15 @@ export function useAudioRecording() {
 
     // Step 1: Stop recording (must always succeed to reset backend state)
     try {
+      console.log('[useAudioRecording] Calling invoke stop_recording...');
       audioData = await invoke<number[]>('stop_recording');
+      console.log('[useAudioRecording] stop_recording returned, audio data length:', audioData?.length ?? 0);
       // Set upload size (audioData is array of bytes)
       if (audioData) {
         setUploadSize(audioData.length);
       }
     } catch (err) {
-      console.error('Failed to stop recording:', err);
+      console.error('[useAudioRecording] Failed to stop recording:', err);
       setError(err as string);
       setRecordingState('idle'); // Immediately return to idle so user can retry
       setAudioLevel(0);
@@ -158,6 +166,7 @@ export function useAudioRecording() {
 
     // Step 2: Transcribe (can fail independently)
     try {
+      console.log('[useAudioRecording] Calling invoke transcribe_and_insert...');
       const result = await invoke<{
         original: string;
         polished: string | null;
@@ -165,6 +174,7 @@ export function useAudioRecording() {
       }>('transcribe_and_insert', {
         audioData,
       });
+      console.log('[useAudioRecording] Transcription result:', result.original.substring(0, 50) + '...');
 
       setTranscription(result.final_text);
       // Add to history if we got a result
@@ -183,9 +193,9 @@ export function useAudioRecording() {
               audio_data: audioData ?? null,
             },
           });
-          console.log('History item saved to backend');
+          console.log('[useAudioRecording] History item saved to backend');
         } catch (err) {
-          console.error('Failed to save history item to backend:', err);
+          console.error('[useAudioRecording] Failed to save history item to backend:', err);
         }
         // Update usage stats
         try {
@@ -193,16 +203,17 @@ export function useAudioRecording() {
             characters: result.final_text.length,
             durationSecs: capturedDuration,
           });
-          console.log('Stats updated');
+          console.log('[useAudioRecording] Stats updated');
         } catch (err) {
-          console.error('Failed to update stats:', err);
+          console.error('[useAudioRecording] Failed to update stats:', err);
         }
       }
       setRecordingState('idle');
       setAudioLevel(0);
       setRecordingDuration(0);
+      console.log('[useAudioRecording] stopRecording - completed successfully');
     } catch (err) {
-      console.error('Failed to transcribe:', err);
+      console.error('[useAudioRecording] Failed to transcribe:', err);
       setError(err as string);
       setRecordingState('idle'); // Immediately return to idle so user can retry
       setAudioLevel(0);
