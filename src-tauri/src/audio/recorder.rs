@@ -249,6 +249,21 @@ impl AudioRecorder {
 
         log::info!("Resampled to {} samples at {} Hz", resampled.len(), TARGET_SAMPLE_RATE);
 
+        // Check minimum recording duration (at least 0.5 seconds = 8000 samples at 16kHz)
+        const MIN_SAMPLES: usize = 8000;
+        if resampled.len() < MIN_SAMPLES {
+            log::warn!(
+                "Recording too short: {} samples (minimum {}). Duration: {:.2}s",
+                resampled.len(),
+                MIN_SAMPLES,
+                resampled.len() as f32 / TARGET_SAMPLE_RATE as f32
+            );
+            return Err(format!(
+                "Recording too short ({:.1}s). Please hold the key longer.",
+                resampled.len() as f32 / TARGET_SAMPLE_RATE as f32
+            ));
+        }
+
         // Convert to Opus/OGG format
         samples_to_opus(&resampled)
     }
