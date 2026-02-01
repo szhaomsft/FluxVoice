@@ -12,8 +12,13 @@ pub fn load_config(app: &tauri::AppHandle) -> Result<AppConfig, String> {
 
     match config_value {
         Some(value) => {
-            serde_json::from_value(value.clone())
-                .map_err(|e| format!("Failed to deserialize config: {}", e))
+            let mut config: AppConfig = serde_json::from_value(value.clone())
+                .map_err(|e| format!("Failed to deserialize config: {}", e))?;
+
+            // Migrate old config fields to new format
+            config.language.migrate();
+
+            Ok(config)
         }
         None => {
             // Return default config if not found

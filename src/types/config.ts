@@ -21,7 +21,7 @@ export interface HotkeyConfig {
 }
 
 export interface LanguageConfig {
-  speechLanguage: string;
+  speechLanguages: string[];  // Changed from speechLanguage to support multiple languages
   modelVersion: string;
 }
 

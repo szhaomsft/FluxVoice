@@ -31,8 +31,30 @@ pub struct HotkeyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageConfig {
-    pub speech_language: String,
+    #[serde(default = "default_speech_languages")]
+    pub speech_languages: Vec<String>,  // Changed from speech_language to support multiple languages
+    #[serde(default)]
     pub model_version: String,
+    // Keep old field for backwards compatibility (will be migrated on save)
+    #[serde(skip_serializing, default)]
+    speech_language: Option<String>,
+}
+
+fn default_speech_languages() -> Vec<String> {
+    vec!["en-US".to_string()]
+}
+
+impl LanguageConfig {
+    pub fn migrate(&mut self) {
+        // Migrate old speech_language to speech_languages if needed
+        if self.speech_languages.is_empty() {
+            if let Some(old_lang) = self.speech_language.take() {
+                self.speech_languages = vec![old_lang];
+            } else {
+                self.speech_languages = default_speech_languages();
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,8 +91,9 @@ impl Default for AppConfig {
                 key: "Z".to_string(),
             },
             language: LanguageConfig {
-                speech_language: "en-US".to_string(),
+                speech_languages: vec!["en-US".to_string()],
                 model_version: "latest".to_string(),
+                speech_language: None,
             },
             ui: UIConfig {
                 position_x: 0,

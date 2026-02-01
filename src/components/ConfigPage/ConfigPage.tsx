@@ -6,6 +6,7 @@ import { Toggle } from '../common/Toggle';
 import { useConfig } from '../../hooks/useConfig';
 import { TranscriptionHistory } from './TranscriptionHistory';
 import { UsageStats } from './UsageStats';
+import { LanguageSelector } from './LanguageSelector';
 import type { AppConfig } from '../../types/config';
 
 type TabType = 'settings' | 'history' | 'stats';
@@ -237,18 +238,19 @@ export const ConfigPage: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-                    Speech Language
+                    Speech Languages
                   </label>
-                  <Input
-                    type="text"
-                    value={localConfig.language.speechLanguage}
-                    onChange={(e) =>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                    Select one or more languages for speech recognition. Multiple languages enable auto-detection.
+                  </p>
+                  <LanguageSelector
+                    selectedLanguages={localConfig.language.speechLanguages}
+                    onChange={(languages) =>
                       setLocalConfig({
                         ...localConfig,
-                        language: { ...localConfig.language, speechLanguage: e.target.value },
+                        language: { ...localConfig.language, speechLanguages: languages },
                       })
                     }
-                    placeholder="e.g., en-US, zh-CN"
                   />
                 </div>
 

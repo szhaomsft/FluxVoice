@@ -30,7 +30,7 @@ pub async fn transcribe_audio(
     audio_data: Vec<u8>,
     subscription_key: &str,
     region: &str,
-    _language: &str, // Kept for API compatibility, but we now use auto-detection
+    languages: &[String],  // Changed to support multiple languages
 ) -> Result<String, String> {
     // Use Fast Transcription API with multi-language support
     let url = format!(
@@ -40,11 +40,12 @@ pub async fn transcribe_audio(
 
     let client = get_http_client();
 
-    log::info!("Sending {} bytes of Opus audio to Azure Fast Transcription API (en-US, zh-CN)", audio_data.len());
+    log::info!("Sending {} bytes of Opus audio to Azure Fast Transcription API (languages: {:?})", audio_data.len(), languages);
+    println!(">>> Transcribing with languages: {:?}", languages);
 
-    // Build definition with multiple locales for auto-detection
+    // Build definition with configured locales for auto-detection
     let definition = TranscriptionDefinition {
-        locales: vec!["en-US".to_string(), "zh-CN".to_string()],
+        locales: languages.to_vec(),
     };
 
     let definition_json = serde_json::to_string(&definition)
@@ -118,7 +119,7 @@ pub async fn transcribe_audio_with_retry(
     audio_data: Vec<u8>,
     subscription_key: &str,
     region: &str,
-    language: &str,
+    languages: &[String],  // Changed to support multiple languages
     max_retries: u32,
 ) -> Result<String, String> {
     for attempt in 0..max_retries {
@@ -126,7 +127,7 @@ pub async fn transcribe_audio_with_retry(
             audio_data.clone(),
             subscription_key,
             region,
-            language,
+            languages,
         )
         .await
         {
