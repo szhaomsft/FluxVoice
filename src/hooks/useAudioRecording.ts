@@ -171,10 +171,16 @@ export function useAudioRecording() {
         original: string;
         polished: string | null;
         final_text: string;
+        post_processing_mode: string;
+        warning: string | null;
       }>('transcribe_and_insert', {
         audioData,
       });
       console.log('[useAudioRecording] Transcription result:', result.original.substring(0, 50) + '...');
+      console.log('[useAudioRecording] Post-processing mode:', result.post_processing_mode);
+      if (result.warning) {
+        console.warn('[useAudioRecording] Post-processing warning:', result.warning);
+      }
 
       setTranscription(result.final_text);
       // Add to history if we got a result

@@ -71,8 +71,33 @@ pub struct UIConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeatureConfig {
-    pub text_polishing_enabled: bool,
+    #[serde(default = "default_post_processing_mode")]
+    pub post_processing_mode: String,  // "none", "polish", or "translate"
+    #[serde(default = "default_translate_target_language")]
+    pub translate_target_language: String,  // e.g. "English", "Japanese"
     pub auto_insert_enabled: bool,
+    // Keep old field for backwards compatibility (will be migrated on save)
+    #[serde(skip_serializing, default)]
+    text_polishing_enabled: Option<bool>,
+}
+
+fn default_post_processing_mode() -> String {
+    "none".to_string()
+}
+
+fn default_translate_target_language() -> String {
+    "English".to_string()
+}
+
+impl FeatureConfig {
+    pub fn migrate(&mut self) {
+        // Migrate old text_polishing_enabled to post_processing_mode if needed
+        if let Some(old_polish) = self.text_polishing_enabled.take() {
+            if self.post_processing_mode == "none" && old_polish {
+                self.post_processing_mode = "polish".to_string();
+            }
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -104,8 +129,10 @@ impl Default for AppConfig {
                 theme: "light".to_string(),
             },
             features: FeatureConfig {
-                text_polishing_enabled: true,
+                post_processing_mode: "none".to_string(),
+                translate_target_language: "English".to_string(),
                 auto_insert_enabled: true,
+                text_polishing_enabled: None,
             },
         }
     }

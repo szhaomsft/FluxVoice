@@ -17,6 +17,7 @@ pub fn load_config(app: &tauri::AppHandle) -> Result<AppConfig, String> {
 
             // Migrate old config fields to new format
             config.language.migrate();
+            config.features.migrate();
 
             Ok(config)
         }

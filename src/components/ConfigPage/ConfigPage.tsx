@@ -199,22 +199,75 @@ export const ConfigPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Enable Text Polishing
+                      Post-Processing Mode
                     </label>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Use Azure OpenAI to improve transcribed text
+                      Choose how transcribed text is processed after recognition
                     </p>
                   </div>
-                  <Toggle
-                    checked={localConfig.features.textPolishingEnabled}
-                    onChange={(checked) =>
+                  <select
+                    value={localConfig.features.postProcessingMode}
+                    onChange={(e) =>
                       setLocalConfig({
                         ...localConfig,
-                        features: { ...localConfig.features, textPolishingEnabled: checked },
+                        features: {
+                          ...localConfig.features,
+                          postProcessingMode: e.target.value as 'none' | 'polish' | 'translate',
+                        },
                       })
                     }
-                  />
+                    className="px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  >
+                    <option value="none">None</option>
+                    <option value="polish">Polish</option>
+                    <option value="translate">Translate</option>
+                  </select>
                 </div>
+
+                {localConfig.features.postProcessingMode === 'translate' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+                      Translation Target Language
+                    </label>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                      Select the language to translate transcribed text into
+                    </p>
+                    <select
+                      value={localConfig.features.translateTargetLanguage}
+                      onChange={(e) =>
+                        setLocalConfig({
+                          ...localConfig,
+                          features: {
+                            ...localConfig.features,
+                            translateTargetLanguage: e.target.value,
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="English">English</option>
+                      <option value="Chinese">Chinese (中文)</option>
+                      <option value="Japanese">Japanese (日本語)</option>
+                      <option value="Korean">Korean (한국어)</option>
+                      <option value="Spanish">Spanish (Español)</option>
+                      <option value="French">French (Français)</option>
+                      <option value="German">German (Deutsch)</option>
+                      <option value="Portuguese">Portuguese (Português)</option>
+                      <option value="Italian">Italian (Italiano)</option>
+                      <option value="Russian">Russian (Русский)</option>
+                      <option value="Arabic">Arabic (العربية)</option>
+                      <option value="Hindi">Hindi (हिन्दी)</option>
+                      <option value="Thai">Thai (ไทย)</option>
+                      <option value="Vietnamese">Vietnamese (Tiếng Việt)</option>
+                      <option value="Indonesian">Indonesian (Bahasa Indonesia)</option>
+                      <option value="Turkish">Turkish (Türkçe)</option>
+                      <option value="Dutch">Dutch (Nederlands)</option>
+                      <option value="Polish">Polish (Polski)</option>
+                      <option value="Swedish">Swedish (Svenska)</option>
+                      <option value="Ukrainian">Ukrainian (Українська)</option>
+                    </select>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between">
                   <div>

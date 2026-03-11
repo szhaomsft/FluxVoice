@@ -35,7 +35,8 @@ export interface UIConfig {
 }
 
 export interface FeatureConfig {
-  textPolishingEnabled: boolean;
+  postProcessingMode: 'none' | 'polish' | 'translate';
+  translateTargetLanguage: string;  // e.g. "English", "Japanese"
   autoInsertEnabled: boolean;
 }
 

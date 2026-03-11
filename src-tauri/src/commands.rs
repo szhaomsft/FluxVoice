@@ -21,6 +21,8 @@ pub struct TranscriptionResult {
     pub original: String,
     pub polished: Option<String>,
     pub final_text: String,
+    pub post_processing_mode: String,
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,35 +123,76 @@ pub async fn transcribe_and_insert(
 
     log::info!("Transcription: {}", transcript);
 
-    // Optionally polish text
-    let (final_text, polished) = if config.features.text_polishing_enabled
-        && !config.azure.openai_key.is_empty()
+    // Post-process based on mode: none, polish, or translate
+    let mode = config.features.post_processing_mode.clone();
+    log::info!(">>> Post-processing mode from config: '{}'", mode);
+    println!(">>> Post-processing mode from config: '{}'", mode);
+
+    let mut warning: Option<String> = None;
+
+    let (final_text, polished) = if !config.azure.openai_key.is_empty()
         && !config.azure.openai_endpoint.is_empty()
     {
-        log::info!(">>> Text polishing ENABLED - calling Azure OpenAI...");
-        println!(">>> Text polishing ENABLED - calling Azure OpenAI...");
-        match openai::polish_text(
-            &transcript,
-            &config.azure.openai_endpoint,
-            &config.azure.openai_key,
-            &config.azure.openai_deployment,
-        )
-        .await
-        {
-            Ok(polished_text) => {
-                log::info!(">>> Polished text: {}", polished_text);
-                println!(">>> Polished text: {}", polished_text);
-                (polished_text.clone(), Some(polished_text))
+        match mode.as_str() {
+            "polish" => {
+                log::info!(">>> Text polishing ENABLED - calling Azure OpenAI...");
+                println!(">>> Text polishing ENABLED - calling Azure OpenAI...");
+                match openai::polish_text(
+                    &transcript,
+                    &config.azure.openai_endpoint,
+                    &config.azure.openai_key,
+                    &config.azure.openai_deployment,
+                )
+                .await
+                {
+                    Ok(polished_text) => {
+                        log::info!(">>> Polished text: {}", polished_text);
+                        println!(">>> Polished text: {}", polished_text);
+                        (polished_text.clone(), Some(polished_text))
+                    }
+                    Err(e) => {
+                        log::warn!(">>> Failed to polish text: {}. Using original transcript.", e);
+                        println!(">>> Failed to polish text: {}. Using original.", e);
+                        warning = Some(format!("Polish failed: {}", e));
+                        (transcript.clone(), None)
+                    }
+                }
             }
-            Err(e) => {
-                log::warn!(">>> Failed to polish text: {}. Using original transcript.", e);
-                println!(">>> Failed to polish text: {}. Using original.", e);
+            "translate" => {
+                let target_lang = &config.features.translate_target_language;
+                log::info!(">>> Translation ENABLED - translating to {} via Azure OpenAI...", target_lang);
+                println!(">>> Translation ENABLED - translating to {} via Azure OpenAI...", target_lang);
+                match openai::translate_text(
+                    &transcript,
+                    target_lang,
+                    &config.azure.openai_endpoint,
+                    &config.azure.openai_key,
+                    &config.azure.openai_deployment,
+                )
+                .await
+                {
+                    Ok(translated_text) => {
+                        log::info!(">>> Translated text: {}", translated_text);
+                        println!(">>> Translated text: {}", translated_text);
+                        (translated_text.clone(), Some(translated_text))
+                    }
+                    Err(e) => {
+                        log::warn!(">>> Failed to translate text: {}. Using original transcript.", e);
+                        println!(">>> Failed to translate text: {}. Using original.", e);
+                        warning = Some(format!("Translation failed: {}", e));
+                        (transcript.clone(), None)
+                    }
+                }
+            }
+            _ => {
+                log::info!(">>> Post-processing mode: none");
+                println!(">>> Post-processing mode: none");
                 (transcript.clone(), None)
             }
         }
     } else {
-        log::info!(">>> Text polishing DISABLED or not configured");
-        println!(">>> Text polishing DISABLED or not configured");
+        log::info!(">>> OpenAI not configured - skipping post-processing");
+        println!(">>> OpenAI not configured - skipping post-processing");
         (transcript.clone(), None)
     };
 
@@ -163,6 +206,8 @@ pub async fn transcribe_and_insert(
         original: transcript,
         polished,
         final_text,
+        post_processing_mode: mode,
+        warning,
     })
 }
 
