@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { X } from 'lucide-react';
 import { Waveform } from './Waveform';
 import { IdleAnimation } from './IdleAnimation';
+import { ProcessingAnimation } from './ProcessingAnimation';
 import { StatusIndicator } from './StatusIndicator';
 import { useAudioRecording } from '../../hooks/useAudioRecording';
 import { useAppStore } from '../../store/appStore';
@@ -206,6 +207,7 @@ export const FloatingWindow: React.FC = () => {
       <div className="p-3 h-full flex flex-col gap-2">
         <StatusIndicator />
         {recordingState === 'recording' && <Waveform />}
+        {recordingState === 'processing' && <ProcessingAnimation />}
         {recordingState === 'idle' && <IdleAnimation />}
         {recordingState === 'idle' && (
           <div className="flex justify-center">
