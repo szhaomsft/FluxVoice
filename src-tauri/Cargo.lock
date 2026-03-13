@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "flux-voice"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "audiopus",
  "bytes",
