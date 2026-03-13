@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { X } from 'lucide-react';
@@ -32,6 +33,12 @@ export const FloatingWindow: React.FC = () => {
   const lastActionTime = useRef(0); // Debounce protection
   const [postProcessingMode, setPostProcessingMode] = useState<'none' | 'polish' | 'translate'>('none');
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState<string>('English');
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  // Load app version on mount
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   // Load config on mount and whenever the window regains focus
   const loadMode = useCallback(async () => {
@@ -204,6 +211,11 @@ export const FloatingWindow: React.FC = () => {
       >
         <X size={14} className="text-gray-500 dark:text-gray-400" />
       </button>
+      {appVersion && (
+        <span className="absolute bottom-1 left-2 text-[8px] text-gray-400 dark:text-gray-600 select-none">
+          v{appVersion}
+        </span>
+      )}
       <div className="p-3 h-full flex flex-col gap-2">
         <StatusIndicator />
         {recordingState === 'recording' && <Waveform />}
