@@ -74,8 +74,8 @@ export const UsageStats: React.FC = () => {
     );
   }
 
-  // Get last 7 days for the chart
-  const last7Days = stats.daily_stats.slice(-7);
+  // Get last 7 days for the chart, most recent first
+  const last7Days = stats.daily_stats.slice(-7).reverse();
   const maxChars = Math.max(...last7Days.map(d => d.total_characters), 1);
 
   return (

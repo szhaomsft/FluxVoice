@@ -313,18 +313,7 @@ pub async fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn get_today_date() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    // Simple date calculation (not accounting for timezones perfectly, but good enough)
-    let days = secs / 86400;
-    let year = 1970 + (days / 365); // Approximate
-    let day_of_year = days % 365;
-    let month = day_of_year / 30 + 1;
-    let day = day_of_year % 30 + 1;
-    format!("{:04}-{:02}-{:02}", year, month.min(12), day.min(31))
+    chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
 #[tauri::command]

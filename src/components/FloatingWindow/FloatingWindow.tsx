@@ -127,18 +127,11 @@ export const FloatingWindow: React.FC = () => {
 
     // Listen for hotkey release - stop recording
     const unlistenRelease = listen('hotkey-released', async () => {
-      const now = Date.now();
-      // Debounce: ignore events within 300ms of last action
-      if (now - lastActionTime.current < 300) {
-        console.log('Hotkey release ignored - debounce');
-        return;
-      }
-
       const currentState = recordingStateRef.current;
       console.log('Hotkey released, current state:', currentState);
 
       if (currentState === 'recording') {
-        lastActionTime.current = now;
+        lastActionTime.current = Date.now();
         await stopRecording();
       } else if (isProcessingHotkey.current) {
         // Recording is still starting, mark as pending release
