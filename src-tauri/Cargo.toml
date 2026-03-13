@@ -1,6 +1,6 @@
 [package]
 name = "flux-voice"
-version = "0.1.0"
+version = "0.2.0"
 description = "Voice input method with Azure transcription and OpenAI polishing"
 authors = ["FluxVoice Team"]
 edition = "2021"
