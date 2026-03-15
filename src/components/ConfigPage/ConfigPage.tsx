@@ -293,11 +293,33 @@ export const ConfigPage: React.FC = () => {
                   <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
                     Speech Languages
                   </label>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-                    Select one or more languages for speech recognition. Multiple languages enable auto-detection.
-                  </p>
-                  <LanguageSelector
-                    selectedLanguages={localConfig.language.speechLanguages}
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {localConfig.language.multilingual
+                        ? 'Multilingual mode: auto-detects and transcribes across languages continuously.'
+                        : 'Select one or more languages for speech recognition. Multiple languages enable auto-detection.'}
+                    </p>
+                    <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Multilingual</span>
+                      <Toggle
+                        checked={localConfig.language.multilingual}
+                        onChange={(checked) =>
+                          setLocalConfig({
+                            ...localConfig,
+                            language: { ...localConfig.language, multilingual: checked },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  {localConfig.language.multilingual && (
+                    <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300 mb-2">
+                      Supported: de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN
+                    </div>
+                  )}
+                  {!localConfig.language.multilingual && (
+                    <LanguageSelector
+                      selectedLanguages={localConfig.language.speechLanguages}
                     onChange={(languages) =>
                       setLocalConfig({
                         ...localConfig,
@@ -305,6 +327,7 @@ export const ConfigPage: React.FC = () => {
                       })
                     }
                   />
+                  )}
                 </div>
 
                 <div>

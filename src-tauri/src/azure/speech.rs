@@ -31,21 +31,30 @@ pub async fn transcribe_audio(
     subscription_key: &str,
     region: &str,
     languages: &[String],  // Changed to support multiple languages
+    multilingual: bool,     // When true, send empty locales for multi-lingual model
 ) -> Result<String, String> {
     // Use Fast Transcription API with multi-language support
     let url = format!(
-        "https://{}.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe?api-version=2024-11-15",
+        "https://{}.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe?api-version=2025-10-15",
         region
     );
 
     let client = get_http_client();
 
-    log::info!("Sending {} bytes of Opus audio to Azure Fast Transcription API (languages: {:?})", audio_data.len(), languages);
-    println!(">>> Transcribing with languages: {:?}", languages);
+    // In multilingual mode, send empty locales to let the API auto-detect
+    let locales = if multilingual {
+        log::info!("Sending {} bytes of Opus audio to Azure Fast Transcription API (multilingual mode)", audio_data.len());
+        println!(">>> Transcribing in multilingual mode");
+        vec![]
+    } else {
+        log::info!("Sending {} bytes of Opus audio to Azure Fast Transcription API (languages: {:?})", audio_data.len(), languages);
+        println!(">>> Transcribing with languages: {:?}", languages);
+        languages.to_vec()
+    };
 
     // Build definition with configured locales for auto-detection
     let definition = TranscriptionDefinition {
-        locales: languages.to_vec(),
+        locales,
     };
 
     let definition_json = serde_json::to_string(&definition)
@@ -120,6 +129,7 @@ pub async fn transcribe_audio_with_retry(
     subscription_key: &str,
     region: &str,
     languages: &[String],  // Changed to support multiple languages
+    multilingual: bool,     // When true, send empty locales for multi-lingual model
     max_retries: u32,
 ) -> Result<String, String> {
     for attempt in 0..max_retries {
@@ -128,6 +138,7 @@ pub async fn transcribe_audio_with_retry(
             subscription_key,
             region,
             languages,
+            multilingual,
         )
         .await
         {
