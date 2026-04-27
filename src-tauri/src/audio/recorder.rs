@@ -39,6 +39,18 @@ impl AudioRecorder {
         })
     }
 
+    /// Create a dummy recorder when no audio input device is available.
+    /// Recording will fail at runtime but the app can still start.
+    pub fn new_dummy() -> Self {
+        Self {
+            buffer: Arc::new(StdMutex::new(Vec::new())),
+            is_recording: Arc::new(StdMutex::new(false)),
+            source_sample_rate: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE)),
+            source_channels: Arc::new(StdMutex::new(1)),
+            stop_sender: None,
+        }
+    }
+
     pub fn start_recording(&mut self) -> Result<(), String> {
         // Check if already recording - stop previous recording first
         {

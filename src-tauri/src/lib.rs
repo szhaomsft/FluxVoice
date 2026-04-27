@@ -27,7 +27,10 @@ pub fn run() {
             // Initialize app state
             let recorder = Arc::new(Mutex::new(
                 AudioRecorder::new()
-                    .expect("Failed to initialize audio recorder"),
+                    .unwrap_or_else(|e| {
+                        log::warn!("Audio recorder init failed (no mic?): {e}. Recording will be unavailable.");
+                        AudioRecorder::new_dummy()
+                    }),
             ));
             let injector = Arc::new(Mutex::new(TextInjector::new()));
 

@@ -34,6 +34,8 @@ pub struct LanguageConfig {
     #[serde(default = "default_speech_languages")]
     pub speech_languages: Vec<String>,  // Changed from speech_language to support multiple languages
     #[serde(default)]
+    pub multilingual: bool,  // When true, send empty locales to use multi-lingual model
+    #[serde(default)]
     pub model_version: String,
     // Keep old field for backwards compatibility (will be migrated on save)
     #[serde(skip_serializing, default)]
@@ -117,6 +119,7 @@ impl Default for AppConfig {
             },
             language: LanguageConfig {
                 speech_languages: vec!["en-US".to_string()],
+                multilingual: false,
                 model_version: "latest".to_string(),
                 speech_language: None,
             },

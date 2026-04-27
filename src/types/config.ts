@@ -22,6 +22,7 @@ export interface HotkeyConfig {
 
 export interface LanguageConfig {
   speechLanguages: string[];  // Changed from speechLanguage to support multiple languages
+  multilingual: boolean;      // When true, use multi-lingual model (auto-detects languages)
   modelVersion: string;
 }
 
