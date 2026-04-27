@@ -73,18 +73,23 @@ fn inject_text_impl(enigo: &mut Enigo, text: &str) -> Result<(), String> {
     // Use clipboard approach for better reliability
     copy_to_clipboard(text)?;
 
-    // Simulate Ctrl+V
+    // Simulate paste: Ctrl+V on Windows, Cmd+V on macOS
+    #[cfg(target_os = "macos")]
+    let modifier = Key::Meta;
+    #[cfg(not(target_os = "macos"))]
+    let modifier = Key::Control;
+
     enigo
-        .key(Key::Control, enigo::Direction::Press)
-        .map_err(|e| format!("Failed to press Ctrl: {}", e))?;
+        .key(modifier, enigo::Direction::Press)
+        .map_err(|e| format!("Failed to press modifier: {}", e))?;
     thread::sleep(Duration::from_millis(50));
     enigo
         .key(Key::Unicode('v'), enigo::Direction::Click)
         .map_err(|e| format!("Failed to press V: {}", e))?;
     thread::sleep(Duration::from_millis(50));
     enigo
-        .key(Key::Control, enigo::Direction::Release)
-        .map_err(|e| format!("Failed to release Ctrl: {}", e))?;
+        .key(modifier, enigo::Direction::Release)
+        .map_err(|e| format!("Failed to release modifier: {}", e))?;
 
     // Wait for paste to complete, then restore original clipboard
     thread::sleep(Duration::from_millis(100));
@@ -108,12 +113,23 @@ fn get_clipboard_text() -> Option<String> {
     get_clipboard::<String, _>(formats::Unicode).ok()
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("Clipboard error: {}", e))?;
+    clipboard.set_text(text).map_err(|e| format!("Clipboard error: {}", e))
+}
+
+#[cfg(target_os = "macos")]
+fn get_clipboard_text() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn copy_to_clipboard(_text: &str) -> Result<(), String> {
     Err("Clipboard operation not supported on this platform".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn get_clipboard_text() -> Option<String> {
     None
 }
