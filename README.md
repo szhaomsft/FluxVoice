@@ -149,6 +149,12 @@ on the language and model, including multilingual mode.
 
 ## Troubleshooting
 
+The floating window displays its version and build commit, for example
+`v0.2.2 (bb8374cc)`. The commit is embedded at build time, so it identifies the
+running build rather than the current checkout. A `-dirty` suffix indicates
+uncommitted changes at build time. Builds without Git metadata display
+`unknown` instead of a commit ID and emit a build warning.
+
 - **No audio**: Check microphone permissions and default device
 - **Transcription errors**: Verify Azure credentials and internet connection
 - **Text not inserting**: Enable auto-insert in settings, ensure target app accepts input

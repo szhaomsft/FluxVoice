@@ -120,6 +120,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
+            commands::get_build_commit,
             commands::report_latency,
             commands::save_config_cmd,
             commands::start_recording,

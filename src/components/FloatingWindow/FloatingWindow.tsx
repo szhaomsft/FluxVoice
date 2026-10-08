@@ -35,9 +35,11 @@ export const FloatingWindow: React.FC = () => {
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState<string>('English');
   const [appVersion, setAppVersion] = useState<string>('');
 
-  // Load app version on mount
+  // Use the native build's commit, not the current checkout's runtime HEAD.
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => {});
+    Promise.all([getVersion(), invoke<string>('get_build_commit')])
+      .then(([version, commit]) => setAppVersion(`${version} (${commit})`))
+      .catch((err) => console.error('Failed to load build identity:', err));
   }, []);
 
   // Load config on mount and whenever the window regains focus
