@@ -1,6 +1,6 @@
 use crate::audio::AudioRecorder;
 use crate::azure::{openai, speech};
-use crate::config::{store, AppConfig};
+use crate::config::{store, AppConfig, SttModel};
 use crate::input::TextInjector;
 use crate::hotkey::{parse_hotkey, HotkeyManager};
 use std::sync::Arc;
@@ -31,6 +31,7 @@ pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
     pub screen_context: Mutex<Option<Result<crate::screen_context::Capture, String>>>,
+    pub recording_config: Mutex<Option<AppConfig>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,6 +79,7 @@ pub async fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
+    speech::validate_model_settings(&config.language)?;
     let (modifiers, key) = parse_hotkey(&config.hotkey)?;
     let manager = app.try_state::<Arc<Mutex<HotkeyManager>>>()
         .ok_or_else(|| "Recording shortcut manager is unavailable".to_string())?;
@@ -115,6 +117,7 @@ pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result
 #[tauri::command]
 pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let config = store::load_config(&app)?;
+    speech::validate_model_settings(&config.language)?;
     let mut screen_context = state.screen_context.lock().await;
     *screen_context = None;
     let capture = if config.features.screen_phrase_hints_enabled {
@@ -124,6 +127,7 @@ pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) 
     };
     let mut recorder = state.recorder.lock().await;
     recorder.start_recording()?;
+    *state.recording_config.lock().await = Some(config.clone());
     *screen_context = capture;
     drop(screen_context);
     drop(recorder);
@@ -148,10 +152,13 @@ pub async fn stop_recording(state: State<'_, AppState>) -> Result<Vec<u8>, Strin
     let started = Instant::now();
     let mut recorder = state.recorder.lock().await;
     println!("[latency] recorder_lock_wait_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
-    let result = recorder.stop_recording();
+    let use_mp3 = state.recording_config.lock().await.as_ref()
+        .is_some_and(|config| config.language.stt_model == SttModel::MaiTranscribe2);
+    let result = recorder.stop_recording(use_mp3);
     drop(recorder);
     if result.is_err() {
         state.screen_context.lock().await.take();
+        state.recording_config.lock().await.take();
     }
     println!("[latency] stop_command_ms={:.1} success={}", started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
     result
@@ -187,7 +194,10 @@ pub async fn transcribe_and_insert(
 
     // Load config
     let config_started = Instant::now();
-    let config = store::load_config(&app)?;
+    let config = match state.recording_config.lock().await.take() {
+        Some(config) => config,
+        None => store::load_config(&app)?,
+    };
     println!("[latency] config_load_ms={:.1}", config_started.elapsed().as_secs_f64() * 1000.0);
 
     // Validate Azure credentials
@@ -220,8 +230,7 @@ pub async fn transcribe_and_insert(
         audio_data,
         &config.azure.speech_key,
         &config.azure.speech_region,
-        &config.language.speech_languages,
-        config.language.multilingual,
+        &config.language,
         &phrases,
         2, // max retries (1 initial + 1 retry)
     )

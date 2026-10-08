@@ -39,6 +39,7 @@ pub fn run() {
                 recorder,
                 injector,
                 screen_context: Mutex::new(None),
+                recording_config: Mutex::new(None),
             });
 
             // Position main window

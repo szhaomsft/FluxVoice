@@ -37,6 +37,10 @@ log = "0.4"
 env_logger = "0.11"
 audiopus = "0.2"
 ogg = "0.9"
+mp3lame-encoder = "0.2.5"
+
+[dev-dependencies]
+minimp3 = "0.6.1"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.0"

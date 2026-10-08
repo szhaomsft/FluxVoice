@@ -6,7 +6,7 @@ export interface TranscriptionHistoryItem {
   polished: string | null;
   finalText: string;
   timestamp: number;
-  audioData?: number[]; // Opus/OGG audio data for playback
+  audioData?: number[]; // Opus/OGG, MP3, or legacy WAV audio data for playback
 }
 
 interface AppStore {
