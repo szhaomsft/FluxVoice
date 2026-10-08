@@ -55,6 +55,11 @@ export const ConfigPage: React.FC = () => {
     );
   }
 
+  const isCapsLockShortcut = localConfig.hotkey.modifier1 === 'None'
+    && !localConfig.hotkey.modifier2 && localConfig.hotkey.key === 'CapsLock';
+  const isDefaultShortcut = localConfig.hotkey.modifier1 === 'Ctrl'
+    && localConfig.hotkey.modifier2 === 'Shift' && localConfig.hotkey.key === 'Z';
+
   return (
     <div className="h-screen bg-gray-50 dark:bg-gray-900 flex flex-col" style={{ padding: '40px 48px' }}>
       <div className="max-w-4xl mx-auto w-full flex flex-col flex-1 min-h-0">
@@ -331,16 +336,35 @@ export const ConfigPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-                    Current Hotkey
+                  <label htmlFor="recording-shortcut" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+                    Recording Shortcut
                   </label>
+                  <select
+                    id="recording-shortcut"
+                    value={isCapsLockShortcut ? 'capsLock' : isDefaultShortcut ? 'default' : 'custom'}
+                    onChange={(e) =>
+                      setLocalConfig({
+                        ...localConfig,
+                        hotkey: e.target.value === 'capsLock'
+                          ? { modifier1: 'None', key: 'CapsLock' }
+                          : { modifier1: 'Ctrl', modifier2: 'Shift', key: 'Z' },
+                      })
+                    }
+                    className="w-full px-3 py-2 mb-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  >
+                    <option value="capsLock">Caps Lock (Windows, hold to record)</option>
+                    <option value="default">Ctrl + Shift + Z (hold to record)</option>
+                    {!isCapsLockShortcut && !isDefaultShortcut
+                      && <option value="custom" disabled>Current custom shortcut</option>}
+                  </select>
                   <div className="px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg font-mono text-sm">
-                    {localConfig.hotkey.modifier1}
-                    {localConfig.hotkey.modifier2 && ` + ${localConfig.hotkey.modifier2}`}
-                    {` + ${localConfig.hotkey.key}`}
+                    {[localConfig.hotkey.modifier1, localConfig.hotkey.modifier2, localConfig.hotkey.key]
+                      .filter((key) => key && key !== 'None')
+                      .join(' + ')}
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Default: Ctrl + Shift + Z (Press to activate/deactivate recording)
+                    Hold to record, release to transcribe. Changes apply when you save.
+                    {isCapsLockShortcut && ' Caps Lock will not toggle capitalization while this shortcut is active. Its existing on/off state is preserved.'}
                   </p>
                 </div>
               </div>
