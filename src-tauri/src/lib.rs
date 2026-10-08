@@ -8,7 +8,7 @@ mod input;
 use crate::audio::AudioRecorder;
 use crate::commands::AppState;
 use crate::config::store;
-use crate::hotkey::{parse_key, parse_modifier, HotkeyManager};
+use crate::hotkey::{parse_hotkey, HotkeyManager};
 use crate::input::TextInjector;
 use std::sync::Arc;
 use tauri::Manager;
@@ -99,54 +99,16 @@ pub fn run() {
                 });
             }
 
-            // Register initial hotkey
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match store::load_config(&app_handle) {
-                    Ok(config) => {
-                        println!("Config loaded: hotkey = {} + {:?} + {}",
-                            config.hotkey.modifier1,
-                            config.hotkey.modifier2,
-                            config.hotkey.key);
-
-                        // Parse and register hotkey
-                        if let Some(modifier1) = parse_modifier(&config.hotkey.modifier1) {
-                            let mut modifiers = modifier1;
-
-                            if let Some(ref modifier2_str) = config.hotkey.modifier2 {
-                                if let Some(modifier2) = parse_modifier(modifier2_str) {
-                                    modifiers |= modifier2;
-                                }
-                            }
-
-                            if let Some(key) = parse_key(&config.hotkey.key) {
-                                let mut hotkey_manager = HotkeyManager::new(app_handle.clone())
-                                    .expect("Failed to create hotkey manager");
-
-                                if let Err(e) = hotkey_manager.register(modifiers, key).await {
-                                    println!("ERROR: Failed to register hotkey: {}", e);
-                                } else {
-                                    println!(
-                                        "SUCCESS: Hotkey registered: {:?} + {}",
-                                        modifiers,
-                                        config.hotkey.key
-                                    );
-                                }
-
-                                // Keep hotkey manager alive
-                                app_handle.manage(Arc::new(Mutex::new(hotkey_manager)));
-                            } else {
-                                println!("ERROR: Failed to parse key: {}", config.hotkey.key);
-                            }
-                        } else {
-                            println!("ERROR: Failed to parse modifier1: {}", config.hotkey.modifier1);
-                        }
-                    }
-                    Err(e) => {
-                        println!("ERROR: Failed to load config: {}", e);
-                    }
-                }
-            });
+            let mut hotkey_manager = HotkeyManager::new(app.handle().clone())?;
+            let registration = store::load_config(app.handle())
+                .and_then(|config| parse_hotkey(&config.hotkey))
+                .and_then(|(modifiers, key)| {
+                    tauri::async_runtime::block_on(hotkey_manager.register(modifiers, key))
+                });
+            if let Err(error) = registration {
+                log::error!("Failed to register initial recording shortcut: {}", error);
+            }
+            app.manage(Arc::new(Mutex::new(hotkey_manager)));
 
             Ok(())
         })
