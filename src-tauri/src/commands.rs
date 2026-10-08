@@ -30,6 +30,7 @@ static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
+    pub screen_context: Mutex<Option<Result<crate::screen_context::Capture, String>>>,
     pub recording_config: Mutex<Option<AppConfig>>,
 }
 
@@ -117,9 +118,18 @@ pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result
 pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let config = store::load_config(&app)?;
     speech::validate_model_settings(&config.language)?;
+    let mut screen_context = state.screen_context.lock().await;
+    *screen_context = None;
+    let capture = if config.features.screen_phrase_hints_enabled {
+        Some(crate::screen_context::start_capture())
+    } else {
+        None
+    };
     let mut recorder = state.recorder.lock().await;
     recorder.start_recording()?;
     *state.recording_config.lock().await = Some(config.clone());
+    *screen_context = capture;
+    drop(screen_context);
     drop(recorder);
     tauri::async_runtime::spawn(async move {
         let openai_endpoint = if config.features.post_processing_mode != "none"
@@ -145,6 +155,11 @@ pub async fn stop_recording(state: State<'_, AppState>) -> Result<Vec<u8>, Strin
     let use_mp3 = state.recording_config.lock().await.as_ref()
         .is_some_and(|config| config.language.stt_model == SttModel::MaiTranscribe2);
     let result = recorder.stop_recording(use_mp3);
+    drop(recorder);
+    if result.is_err() {
+        state.screen_context.lock().await.take();
+        state.recording_config.lock().await.take();
+    }
     println!("[latency] stop_command_ms={:.1} success={}", started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
     result
 }
@@ -175,6 +190,7 @@ pub async fn transcribe_and_insert(
         }
     }
     let _guard = TranscriptionGuard;
+    let capture = state.screen_context.lock().await.take();
 
     // Load config
     let config_started = Instant::now();
@@ -189,6 +205,25 @@ pub async fn transcribe_and_insert(
         return Err("Azure Speech key not configured".to_string());
     }
 
+    let mut warnings = Vec::new();
+    let phrases = if config.features.screen_phrase_hints_enabled {
+        let result = match capture {
+            Some(Ok(capture)) => capture.finish().await,
+            Some(Err(error)) => Err(error),
+            None => Ok(Vec::new()),
+        };
+        match result {
+            Ok(phrases) => phrases,
+            Err(error) => {
+                log::warn!("Screen phrase hints unavailable: {}", error);
+                warnings.push(format!("Screen phrase hints unavailable: {}", error));
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
     // Transcribe audio with retry
     let speech_started = Instant::now();
     let transcript_result = speech::transcribe_audio_with_retry(
@@ -196,6 +231,7 @@ pub async fn transcribe_and_insert(
         &config.azure.speech_key,
         &config.azure.speech_region,
         &config.language,
+        &phrases,
         2, // max retries (1 initial + 1 retry)
     )
     .await;
@@ -208,8 +244,6 @@ pub async fn transcribe_and_insert(
     let mode = config.features.post_processing_mode.clone();
     log::info!(">>> Post-processing mode from config: '{}'", mode);
     println!(">>> Post-processing mode from config: '{}'", mode);
-
-    let mut warning: Option<String> = None;
 
     let processing_started = Instant::now();
     let (final_text, polished) = if !config.azure.openai_key.is_empty()
@@ -235,7 +269,7 @@ pub async fn transcribe_and_insert(
                     Err(e) => {
                         log::warn!(">>> Failed to polish text: {}. Using original transcript.", e);
                         println!(">>> Failed to polish text: {}. Using original.", e);
-                        warning = Some(format!("Polish failed: {}", e));
+                        warnings.push(format!("Polish failed: {}", e));
                         (transcript.clone(), None)
                     }
                 }
@@ -261,7 +295,7 @@ pub async fn transcribe_and_insert(
                     Err(e) => {
                         log::warn!(">>> Failed to translate text: {}. Using original transcript.", e);
                         println!(">>> Failed to translate text: {}. Using original.", e);
-                        warning = Some(format!("Translation failed: {}", e));
+                        warnings.push(format!("Translation failed: {}", e));
                         (transcript.clone(), None)
                     }
                 }
@@ -278,6 +312,11 @@ pub async fn transcribe_and_insert(
         (transcript.clone(), None)
     };
 
+    let warning = if warnings.is_empty() {
+        None
+    } else {
+        Some(warnings.join("; "))
+    };
     println!("[latency] post_processing_ms={:.1} mode={} warning={}", processing_started.elapsed().as_secs_f64() * 1000.0, mode, warning.is_some());
 
     // Insert into active window if enabled

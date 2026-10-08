@@ -42,6 +42,7 @@ export interface FeatureConfig {
   postProcessingMode: 'none' | 'polish' | 'translate';
   translateTargetLanguage: string;  // e.g. "English", "Japanese"
   autoInsertEnabled: boolean;
+  screenPhraseHintsEnabled: boolean;
 }
 
 export type RecordingState = 'idle' | 'recording' | 'processing' | 'error';

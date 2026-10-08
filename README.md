@@ -10,6 +10,7 @@ A voice input method application with Azure Speech transcription and OpenAI poli
 - **Multilingual Transcription** - Auto-detects and transcribes across multiple languages continuously (de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN)
 - **AI Text Polishing** - Optional enhancement with Azure OpenAI (configurable model deployment)
 - **Auto-insertion** - Automatically paste transcribed text into active windows
+- **Screen phrase hints (Windows)** - Optional UI Automation context to improve recognition of on-screen terms
 - **Waveform visualization** - Real-time audio level display while recording
 - **Configurable settings** - Full customization of Azure credentials, hotkeys, and preferences
 
@@ -106,6 +107,30 @@ they do not toggle capitalization; the existing Caps Lock on/off state is
 preserved. Other keys and software-generated key events are unaffected. Switch
 back to **Ctrl + Shift + Z** and save, or exit FluxVoice, to restore normal Caps
 Lock behavior. Release the recording shortcut before changing it.
+
+### Screen Phrase Hints (Windows)
+
+Enable **Settings > General Settings > Screen Phrase Hints (Windows)** and save.
+This feature is off by default, including for existing configurations. At recording
+startup, FluxVoice uses Windows UI Automation on a separate thread to read
+accessible, on-screen text in the foreground window. It prioritizes the focused
+control and extracts up to 100 deduplicated words and short phrases for Azure
+the selected STT model's `phraseList` (Fast, LLM Speech, or MAI-Transcribe-2).
+It does not use screenshots or OCR.
+
+**Privacy:** Extracted phrases are sent to your configured Azure Speech service
+with the audio. UI Automation password controls and their descendants are
+excluded; capture is skipped when a password control is focused or FluxVoice
+itself is foreground. Other accessible text can still contain sensitive
+information, and controls that do not identify themselves as passwords cannot
+be reliably filtered. Screen context is kept in memory for the current recording
+only and is not added to history or logs.
+
+Capture is bounded by time, text size, and element count. Unsupported apps,
+elevated windows, and custom-rendered controls may expose little or no accessible
+text. Capture failures produce a warning without preventing transcription.
+Hints bias recognition rather than guarantee it; their effectiveness depends
+on the language and model, including multilingual mode.
 
 ## Usage
 
