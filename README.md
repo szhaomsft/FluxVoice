@@ -56,6 +56,42 @@ Enable it in **Settings → Speech Languages → Multilingual** toggle.
 - **Multilingual ON**: The API uses the multi-lingual speech model to auto-detect and transcribe across supported languages (de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN). No locale selection needed.
 - **Multilingual OFF**: Select specific locale(s) for language identification. Multiple locales enable auto-detection of the single best-matching locale per audio.
 
+### Speech-to-Text Model
+
+Choose **Settings → General Settings → Speech-to-Text Model**, then save:
+
+| Model | Request mode | Recording format |
+| --- | --- | --- |
+| Fast STT (default) | Standard Fast Transcription | 16 kHz mono Opus/OGG |
+| LLM Speech | `enhancedMode: { enabled: true, task: "transcribe" }` | 16 kHz mono Opus/OGG |
+| MAI-Transcribe-2 (public preview) | `enhancedMode: { enabled: true, model: "MAI-Transcribe-2" }` | 16 kHz mono MP3 at 48 kbps |
+
+All three use the configured Azure Speech key/region and API version
+`2025-10-15`. Existing configurations default to Fast STT. The recording captures
+its settings when it starts, so model or post-processing changes apply to the
+next recording. Polish and translation still use the separate OpenAI
+post-processing settings; selecting LLM Speech does not automatically translate.
+
+LLM Speech and MAI require a region/resource supporting the selected model.
+Model availability and language support differ; service errors are shown rather
+than silently falling back to Fast STT. See [LLM Speech](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/llm-speech)
+and [MAI-Transcribe-2](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe).
+
+MAI supports automatic multilingual detection when **Multilingual** is enabled.
+When disabled, select one language hint; regional locales are converted to MAI
+language codes (`en-US` → `en`, `zh-CN` → `zh`, `zh-HK` → `yue`). MAI recordings
+are encoded directly from captured PCM to MP3 with the bundled LAME encoder;
+no FFmpeg installation or external conversion process is required. At 48 kbps,
+MP3 uses approximately 6 KB per second compared with 32 KB per second for
+16-bit mono WAV, plus frame/padding overhead. MP3 is lossy, so recognition quality
+and latency should be evaluated with representative speech. History playback
+and export handle MP3, Opus/OGG, and existing WAV recordings.
+
+The `mp3lame-encoder` and `mp3lame-sys` crates are LGPL-3.0 dependencies.
+Binary distributors must comply with their applicable license and relinking/source
+requirements; see the [encoder project](https://github.com/DoumanAsh/mp3lame-encoder)
+and [native binding project](https://github.com/DoumanAsh/mp3lame-sys).
+
 ### Hotkey
 
 Default hotkey is **Ctrl+Shift+Z**. Press once to start recording, press again to stop.

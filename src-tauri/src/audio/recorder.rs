@@ -243,7 +243,7 @@ impl AudioRecorder {
         Ok(())
     }
 
-    pub fn stop_recording(&mut self) -> Result<Vec<u8>, String> {
+    pub fn stop_recording(&mut self, use_mp3: bool) -> Result<Vec<u8>, String> {
         let started = std::time::Instant::now();
         log::info!("stop_recording called");
         println!(">>> stop_recording called");
@@ -349,12 +349,11 @@ impl AudioRecorder {
             ));
         }
 
-        // Convert to Opus/OGG format
+        // MAI-Transcribe-2 does not accept Opus/OGG.
         println!("[latency] audio_copy_mono_resample_ms={:.1}", preparation_started.elapsed().as_secs_f64() * 1000.0);
         let encoding_started = std::time::Instant::now();
-        println!(">>> Encoding to Opus/OGG...");
-        let result = samples_to_opus(&resampled);
-        println!("[latency] opus_encoding_ms={:.1} success={}", encoding_started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
+        let result = if use_mp3 { samples_to_mp3(&resampled) } else { samples_to_opus(&resampled) };
+        println!("[latency] audio_encoding_ms={:.1} format={} success={}", encoding_started.elapsed().as_secs_f64() * 1000.0, if use_mp3 { "mp3" } else { "opus" }, result.is_ok());
         if let Ok(ref data) = result {
             println!(">>> Encoded successfully: {} bytes", data.len());
         }
@@ -469,6 +468,54 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     }
 
     output
+}
+
+fn samples_to_mp3(samples: &[f32]) -> Result<Vec<u8>, String> {
+    use mp3lame_encoder::{Bitrate, Builder, FlushGap, Mode, MonoPcm, Quality};
+
+    let mut encoder = Builder::new()
+        .ok_or_else(|| "Failed to allocate MP3 encoder".to_string())?
+        .with_num_channels(1)
+        .and_then(|builder| builder.with_mode(Mode::Mono))
+        .and_then(|builder| builder.with_sample_rate(TARGET_SAMPLE_RATE))
+        .and_then(|builder| builder.with_output_sample_rate(std::num::NonZeroU32::new(TARGET_SAMPLE_RATE)))
+        .and_then(|builder| builder.with_brate(Bitrate::Kbps48))
+        .and_then(|builder| builder.with_quality(Quality::Good))
+        .and_then(|builder| builder.with_to_write_vbr_tag(false))
+        .and_then(Builder::build)
+        .map_err(|error| format!("Failed to configure MP3 encoder: {}", error))?;
+
+    let pcm: Vec<i16> = samples.iter()
+        .map(|sample| (*sample * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16)
+        .collect();
+    let mut output = Vec::with_capacity(mp3lame_encoder::max_required_buffer_size(pcm.len()));
+    encoder.encode_to_vec(MonoPcm(&pcm), &mut output)
+        .map_err(|error| format!("Failed to encode MP3 recording: {}", error))?;
+    output.reserve(7200);
+    // FlushGap emits buffered samples and pads the final frame instead of discarding the tail.
+    encoder.flush_to_vec::<FlushGap>(&mut output)
+        .map_err(|error| format!("Failed to finalize MP3 recording: {}", error))?;
+    Ok(output)
+}
+
+#[cfg(test)]
+fn samples_to_wav(samples: &[f32]) -> Result<Vec<u8>, String> {
+    let mut cursor = Cursor::new(Vec::new());
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: TARGET_SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::new(&mut cursor, spec)
+        .map_err(|error| format!("Failed to create WAV recording: {}", error))?;
+    for sample in samples {
+        let pcm = (*sample * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        writer.write_sample(pcm)
+            .map_err(|error| format!("Failed to write WAV recording: {}", error))?;
+    }
+    writer.finalize().map_err(|error| format!("Failed to finalize WAV recording: {}", error))?;
+    Ok(cursor.into_inner())
 }
 
 fn samples_to_opus(samples: &[f32]) -> Result<Vec<u8>, String> {
@@ -590,4 +637,85 @@ fn create_opus_tags() -> Vec<u8> {
     tags.extend_from_slice(vendor);
     tags.extend_from_slice(&0u32.to_le_bytes()); // No user comments
     tags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mp3_encoding_is_decodable_mono_16khz_48kbps_and_smaller_than_wav() {
+        let samples: Vec<f32> = (0..160000)
+            .map(|index| (index as f32 * 440.0 * std::f32::consts::TAU / 16000.0).sin() * 0.4)
+            .collect();
+        let started = std::time::Instant::now();
+        let audio = samples_to_mp3(&samples).unwrap();
+        let encoding_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let wav = samples_to_wav(&samples).unwrap();
+        assert!(audio.len() < wav.len() / 4, "MP3 should be less than 25% of WAV size");
+        println!("[mp3-check] duration_secs=10 mp3_bytes={} wav_bytes={} encoding_ms={:.1}", audio.len(), wav.len(), encoding_ms);
+
+        let mut decoder = minimp3::Decoder::new(Cursor::new(audio));
+        let mut decoded = Vec::new();
+        loop {
+            match decoder.next_frame() {
+                Ok(frame) => {
+                    assert_eq!(frame.sample_rate, 16000);
+                    assert_eq!(frame.channels, 1);
+                    assert_eq!(frame.bitrate, 48);
+                    decoded.extend(frame.data);
+                }
+                Err(minimp3::Error::Eof) => break,
+                Err(error) => panic!("Invalid encoded MP3: {:?}", error),
+            }
+        }
+        assert!(decoded.len() >= samples.len(), "Final audio samples were not flushed");
+        assert!(decoded.len() <= samples.len() + 2304, "Unexpected encoder delay/padding");
+        assert!(decoded.iter().any(|sample| sample.abs() > 1000), "Encoded audio became silent");
+    }
+
+    #[test]
+    fn mp3_flush_preserves_short_and_partial_frames() {
+        for length in [8000, 12345] {
+            let audio = samples_to_mp3(&vec![0.25; length]).unwrap();
+            let mut decoder = minimp3::Decoder::new(Cursor::new(audio));
+            let mut sample_count = 0;
+            loop {
+                match decoder.next_frame() {
+                    Ok(frame) => sample_count += frame.data.len(),
+                    Err(minimp3::Error::Eof) => break,
+                    Err(error) => panic!("Invalid short MP3: {:?}", error),
+                }
+            }
+            assert!(sample_count >= length, "Short recording was truncated");
+            assert!(sample_count <= length + 2304);
+        }
+    }
+
+    #[test]
+    fn wav_encoding_preserves_duration_and_pcm_format() {
+        let audio = samples_to_wav(&vec![0.25; 16000]).unwrap();
+        let mut reader = hound::WavReader::new(Cursor::new(audio)).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16000);
+        assert_eq!(reader.spec().channels, 1);
+        assert_eq!(reader.spec().bits_per_sample, 16);
+        assert_eq!(reader.spec().sample_format, hound::SampleFormat::Int);
+        assert_eq!(reader.duration(), 16000);
+        assert!(reader.samples::<i16>().all(|sample| sample.unwrap() == 8191));
+    }
+
+    #[test]
+    fn wav_encoding_clamps_out_of_range_samples() {
+        let audio = samples_to_wav(&[-2.0, 0.0, 2.0]).unwrap();
+        let mut reader = hound::WavReader::new(Cursor::new(audio)).unwrap();
+        let samples: Vec<i16> = reader.samples::<i16>().map(Result::unwrap).collect();
+        assert_eq!(samples, vec![i16::MIN, 0, i16::MAX]);
+    }
+
+    #[test]
+    fn existing_opus_encoding_remains_available() {
+        let audio = samples_to_opus(&vec![0.0; 8000]).unwrap();
+        assert!(audio.starts_with(b"OggS"));
+        assert!(audio.windows(8).any(|window| window == b"OpusHead"));
+    }
 }

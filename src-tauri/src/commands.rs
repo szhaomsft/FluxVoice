@@ -1,6 +1,6 @@
 use crate::audio::AudioRecorder;
 use crate::azure::{openai, speech};
-use crate::config::{store, AppConfig};
+use crate::config::{store, AppConfig, SttModel};
 use crate::input::TextInjector;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +29,7 @@ static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
+    pub recording_config: Mutex<Option<AppConfig>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,30 +77,29 @@ pub async fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
+    speech::validate_model_settings(&config.language)?;
     store::save_config(&app, &config)
 }
 
 #[tauri::command]
 pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let config = store::load_config(&app)?;
+    speech::validate_model_settings(&config.language)?;
     let mut recorder = state.recorder.lock().await;
     recorder.start_recording()?;
+    *state.recording_config.lock().await = Some(config.clone());
     drop(recorder);
     tauri::async_runtime::spawn(async move {
-        match store::load_config(&app) {
-            Ok(config) => {
-                let openai_endpoint = if config.features.post_processing_mode != "none"
-                    && !config.azure.openai_key.is_empty()
-                    && !config.azure.openai_endpoint.is_empty()
-                {
-                    Some(config.azure.openai_endpoint.as_str())
-                } else {
-                    None
-                };
-                if !config.azure.speech_key.is_empty() {
-                    crate::azure::warm_connections(&config.azure.speech_region, openai_endpoint).await;
-                }
-            }
-            Err(error) => log::warn!("Could not load configuration for connection warmup: {}", error),
+        let openai_endpoint = if config.features.post_processing_mode != "none"
+            && !config.azure.openai_key.is_empty()
+            && !config.azure.openai_endpoint.is_empty()
+        {
+            Some(config.azure.openai_endpoint.as_str())
+        } else {
+            None
+        };
+        if !config.azure.speech_key.is_empty() {
+            crate::azure::warm_connections(&config.azure.speech_region, openai_endpoint).await;
         }
     });
     Ok(())
@@ -110,7 +110,9 @@ pub async fn stop_recording(state: State<'_, AppState>) -> Result<Vec<u8>, Strin
     let started = Instant::now();
     let mut recorder = state.recorder.lock().await;
     println!("[latency] recorder_lock_wait_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
-    let result = recorder.stop_recording();
+    let use_mp3 = state.recording_config.lock().await.as_ref()
+        .is_some_and(|config| config.language.stt_model == SttModel::MaiTranscribe2);
+    let result = recorder.stop_recording(use_mp3);
     println!("[latency] stop_command_ms={:.1} success={}", started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
     result
 }
@@ -144,7 +146,10 @@ pub async fn transcribe_and_insert(
 
     // Load config
     let config_started = Instant::now();
-    let config = store::load_config(&app)?;
+    let config = match state.recording_config.lock().await.take() {
+        Some(config) => config,
+        None => store::load_config(&app)?,
+    };
     println!("[latency] config_load_ms={:.1}", config_started.elapsed().as_secs_f64() * 1000.0);
 
     // Validate Azure credentials
@@ -158,8 +163,7 @@ pub async fn transcribe_and_insert(
         audio_data,
         &config.azure.speech_key,
         &config.azure.speech_region,
-        &config.language.speech_languages,
-        config.language.multilingual,
+        &config.language,
         2, // max retries (1 initial + 1 retry)
     )
     .await;
