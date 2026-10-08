@@ -201,6 +201,38 @@ export const ConfigPage: React.FC = () => {
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow" style={{ padding: '24px 32px' }}>
               <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">General Settings</h2>
               <div className="space-y-4">
+                <div>
+                  <label htmlFor="stt-model" className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
+                    Speech-to-Text Model
+                  </label>
+                  <select
+                    id="stt-model"
+                    value={localConfig.language.sttModel}
+                    onChange={(e) => {
+                      const model = e.target.value;
+                      if (model === 'fast' || model === 'llmSpeech' || model === 'maiTranscribe2') {
+                        setLocalConfig({
+                          ...localConfig,
+                          language: { ...localConfig.language, sttModel: model },
+                        });
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  >
+                    <option value="fast">Fast STT</option>
+                    <option value="llmSpeech">LLM Speech</option>
+                    <option value="maiTranscribe2">MAI-Transcribe-2 (Preview)</option>
+                  </select>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                    {localConfig.language.sttModel === 'fast'
+                      ? 'Standard Azure Fast Transcription using compressed Opus audio.'
+                      : localConfig.language.sttModel === 'llmSpeech'
+                        ? 'LLM-enhanced transcription using compressed Opus audio. Requires a supported Azure Speech region.'
+                        : 'MAI-Transcribe-2 uses 48 kbps mono MP3 audio and supports automatic multilingual detection or one explicit language hint. Requires a supported Azure Speech region.'}
+                    {' '}Changes apply to the next recording. Polish and translation settings remain separate.
+                  </p>
+                </div>
+
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -319,12 +351,17 @@ export const ConfigPage: React.FC = () => {
                   </div>
                   {localConfig.language.multilingual && (
                     <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300 mb-2">
-                      Supported: de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN
+                      {localConfig.language.sttModel === 'fast'
+                        ? 'Supported: de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN'
+                        : localConfig.language.sttModel === 'llmSpeech'
+                          ? 'LLM Speech automatically detects supported input languages, including mixed-language speech.'
+                          : 'MAI-Transcribe-2 automatically detects 60 supported languages, including code switching.'}
                     </div>
                   )}
                   {!localConfig.language.multilingual && (
                     <LanguageSelector
                       selectedLanguages={localConfig.language.speechLanguages}
+                      singleSelect={localConfig.language.sttModel === 'maiTranscribe2'}
                     onChange={(languages) =>
                       setLocalConfig({
                         ...localConfig,
@@ -332,6 +369,11 @@ export const ConfigPage: React.FC = () => {
                       })
                     }
                   />
+                  )}
+                  {!localConfig.language.multilingual && localConfig.language.sttModel === 'maiTranscribe2' && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-2">
+                      Select one language hint, or enable Multilingual to recognize multiple languages automatically.
+                    </p>
                   )}
                 </div>
 

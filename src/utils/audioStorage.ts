@@ -1,5 +1,23 @@
 // IndexedDB storage for audio data (too large for localStorage)
 
+export function getAudioFormat(audioData: readonly number[]): { extension: 'wav' | 'ogg' | 'mp3'; mimeType: string } {
+  const header = String.fromCharCode(...audioData.slice(0, 4));
+  if (header === 'RIFF' && String.fromCharCode(...audioData.slice(8, 12)) === 'WAVE') {
+    return { extension: 'wav', mimeType: 'audio/wav' };
+  }
+  if (header === 'OggS') {
+    return { extension: 'ogg', mimeType: 'audio/ogg; codecs=opus' };
+  }
+  if ((header.startsWith('ID3') && audioData.length >= 10)
+    || (audioData.length >= 4 && audioData[0] === 0xff && (audioData[1] & 0xe0) === 0xe0
+      && (audioData[1] & 0x06) === 0x02 && (audioData[1] & 0x18) !== 0x08
+      && (audioData[2] & 0xf0) !== 0 && (audioData[2] & 0xf0) !== 0xf0
+      && (audioData[2] & 0x0c) !== 0x0c)) {
+    return { extension: 'mp3', mimeType: 'audio/mpeg' };
+  }
+  throw new Error('Unsupported recording format: expected WAV, MP3, or Opus/OGG audio.');
+}
+
 const DB_NAME = 'fluxvoice_audio_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'audio_recordings';

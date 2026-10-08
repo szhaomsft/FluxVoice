@@ -34,7 +34,7 @@ pub fn run() {
             ));
             let injector = Arc::new(Mutex::new(TextInjector::new()));
 
-            app.manage(AppState { recorder, injector });
+            app.manage(AppState { recorder, injector, recording_config: Mutex::new(None) });
 
             // Position main window
             if let Some(window) = app.get_webview_window("main") {
