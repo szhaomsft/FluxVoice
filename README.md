@@ -82,6 +82,32 @@ Default hotkey is **Ctrl+Shift+Z**. Press once to start recording, press again t
 - **Text not inserting**: Enable auto-insert in settings, ensure target app accepts input
 - **Hotkey not working**: Check for conflicts with other applications
 
+### Measuring recognition latency
+
+Run `npm run tauri dev` and make a normal recording. Lines prefixed with
+`[latency]` report milliseconds spent stopping and preparing audio, encoding,
+speech requests and retries, post-processing, insertion, and saving history/stats.
+The frontend summary distinguishes release-handler-to-result from
+release-handler-to-idle; these totals include IPC but exclude OS hotkey delivery
+and the final UI paint. Request-to-headers timings combine connection setup,
+upload, service processing, and network transit; they do not isolate Azure
+compute time. Nested stage timings should not be added to their enclosing totals.
+Timing diagnostics contain durations, status codes, and processing mode, not
+credentials or transcript text.
+
+History and usage statistics are saved in a serialized background queue after a
+result is received, without delaying the return to idle. Save failures appear in
+the floating window when idle. Allow pending saves to finish before closing the
+app.
+
+Speech and OpenAI share a pooled HTTP client that retains idle connections for
+up to 10 minutes. Recording startup asynchronously warms the configured service
+connections with unauthenticated HEAD requests; OpenAI is warmed only when
+post-processing is enabled. These requests send no audio or text and do not
+invoke a model. Warmup does not delay recording or change inference settings.
+Servers can still close idle connections, and warming a connection does not
+warm the model itself or eliminate model-generation latency.
+
 ## License
 
 For demonstration purposes.

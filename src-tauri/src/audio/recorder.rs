@@ -244,6 +244,7 @@ impl AudioRecorder {
     }
 
     pub fn stop_recording(&mut self) -> Result<Vec<u8>, String> {
+        let started = std::time::Instant::now();
         log::info!("stop_recording called");
         println!(">>> stop_recording called");
 
@@ -258,6 +259,8 @@ impl AudioRecorder {
 
         // Wait a bit for the thread to stop
         std::thread::sleep(std::time::Duration::from_millis(100));
+        println!("[latency] recorder_stop_wait_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
+        let preparation_started = std::time::Instant::now();
 
         // Set recording flag to false
         {
@@ -347,8 +350,11 @@ impl AudioRecorder {
         }
 
         // Convert to Opus/OGG format
+        println!("[latency] audio_copy_mono_resample_ms={:.1}", preparation_started.elapsed().as_secs_f64() * 1000.0);
+        let encoding_started = std::time::Instant::now();
         println!(">>> Encoding to Opus/OGG...");
         let result = samples_to_opus(&resampled);
+        println!("[latency] opus_encoding_ms={:.1} success={}", encoding_started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
         if let Ok(ref data) = result {
             println!(">>> Encoded successfully: {} bytes", data.len());
         }

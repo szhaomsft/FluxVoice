@@ -74,25 +74,30 @@ pub async fn transcribe_audio(
         .part("audio", audio_part)
         .part("definition", definition_part);
 
-    let response = client
+    let request_started = std::time::Instant::now();
+    let response_result = client
         .post(&url)
         .header("Ocp-Apim-Subscription-Key", subscription_key)
         .multipart(form)
         .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .await;
+    println!("[latency] speech_request_to_headers_ms={:.1} success={}", request_started.elapsed().as_secs_f64() * 1000.0, response_result.is_ok());
+    let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
 
     let status = response.status();
+    println!("[latency] speech_http_status={}", status.as_u16());
 
     if !status.is_success() {
         let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!("API error ({}): {}", status, error_body));
     }
 
+    let body_started = std::time::Instant::now();
     let result: FastTranscriptionResponse = response
         .json()
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
+    println!("[latency] speech_response_body_parse_ms={:.1}", body_started.elapsed().as_secs_f64() * 1000.0);
 
     // Extract text from combinedPhrases (preferred) or phrases
     if let Some(combined) = result.combined_phrases {
@@ -133,6 +138,7 @@ pub async fn transcribe_audio_with_retry(
     max_retries: u32,
 ) -> Result<String, String> {
     for attempt in 0..max_retries {
+        println!("[latency] speech_attempt={}", attempt + 1);
         match transcribe_audio(
             audio_data.clone(),
             subscription_key,
@@ -145,6 +151,7 @@ pub async fn transcribe_audio_with_retry(
             Ok(result) => return Ok(result),
             Err(e) if attempt < max_retries - 1 => {
                 log::warn!("Transcription attempt {} failed: {}. Retrying...", attempt + 1, e);
+                println!("[latency] speech_retry_backoff_ms={}", 1000 * 2_u64.pow(attempt));
                 tokio::time::sleep(tokio::time::Duration::from_secs(2_u64.pow(attempt))).await;
             }
             Err(e) => {

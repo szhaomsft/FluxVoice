@@ -57,26 +57,31 @@ async fn call_openai(
 
     log::info!("Calling Azure OpenAI deployment '{}' ...", deployment);
 
-    let response = client
+    let request_started = std::time::Instant::now();
+    let response_result = client
         .post(&url)
         .header("api-key", api_key)
         .header("Content-Type", "application/json")
         .json(&request)
         .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+        .await;
+    println!("[latency] openai_request_to_headers_ms={:.1} success={}", request_started.elapsed().as_secs_f64() * 1000.0, response_result.is_ok());
+    let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
 
     let status = response.status();
+    println!("[latency] openai_http_status={}", status.as_u16());
 
     if !status.is_success() {
         let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!("API error ({}): {}", status, error_body));
     }
 
+    let body_started = std::time::Instant::now();
     let result: ChatCompletionResponse = response
         .json()
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
+    println!("[latency] openai_response_body_parse_ms={:.1}", body_started.elapsed().as_secs_f64() * 1000.0);
 
     result
         .choices

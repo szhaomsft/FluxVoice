@@ -18,8 +18,12 @@ function formatDuration(seconds: number): string {
 
 export const StatusIndicator: React.FC = () => {
   const { recordingState, error, uploadSize, recordingDuration } = useAppStore();
+  const idleError = recordingState === 'idle' && error;
 
   const getIcon = () => {
+    if (idleError) {
+      return <AlertCircle className="w-4 h-4 text-red-500" />;
+    }
     switch (recordingState) {
       case 'recording':
         return <Mic className="w-4 h-4 text-red-500 animate-pulse" />;
@@ -40,6 +44,9 @@ export const StatusIndicator: React.FC = () => {
   };
 
   const getLabel = () => {
+    if (idleError) {
+      return `Error: ${error}`;
+    }
     switch (recordingState) {
       case 'recording':
         return `Recording ${formatDuration(recordingDuration)}`;
@@ -61,7 +68,7 @@ export const StatusIndicator: React.FC = () => {
       <div className="flex-shrink-0">{getIcon()}</div>
       <span
         className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate"
-        title={recordingState === 'error' && error ? error : undefined}
+        title={(recordingState === 'error' || idleError) && error ? error : undefined}
       >
         {getLabel()}
       </span>
