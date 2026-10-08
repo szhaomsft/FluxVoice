@@ -152,6 +152,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
+            commands::report_latency,
             commands::save_config_cmd,
             commands::start_recording,
             commands::stop_recording,
@@ -169,4 +170,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

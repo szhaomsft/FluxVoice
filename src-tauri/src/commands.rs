@@ -7,6 +7,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tauri::State;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+
+#[derive(Deserialize)]
+pub struct LatencyStage {
+    pub stage: String,
+    pub duration_ms: f64,
+}
+
+#[tauri::command]
+pub fn report_latency(stages: Vec<LatencyStage>, success: bool) {
+    println!("[latency] frontend_summary success={}", success);
+    for stage in stages {
+        println!("[latency] {}={:.1}", stage.stage, stage.duration_ms);
+    }
+}
 
 // Global lock to prevent concurrent transcription operations
 static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
@@ -65,15 +80,39 @@ pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result
 }
 
 #[tauri::command]
-pub async fn start_recording(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut recorder = state.recorder.lock().await;
-    recorder.start_recording()
+    recorder.start_recording()?;
+    drop(recorder);
+    tauri::async_runtime::spawn(async move {
+        match store::load_config(&app) {
+            Ok(config) => {
+                let openai_endpoint = if config.features.post_processing_mode != "none"
+                    && !config.azure.openai_key.is_empty()
+                    && !config.azure.openai_endpoint.is_empty()
+                {
+                    Some(config.azure.openai_endpoint.as_str())
+                } else {
+                    None
+                };
+                if !config.azure.speech_key.is_empty() {
+                    crate::azure::warm_connections(&config.azure.speech_region, openai_endpoint).await;
+                }
+            }
+            Err(error) => log::warn!("Could not load configuration for connection warmup: {}", error),
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn stop_recording(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    let started = Instant::now();
     let mut recorder = state.recorder.lock().await;
-    recorder.stop_recording()
+    println!("[latency] recorder_lock_wait_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
+    let result = recorder.stop_recording();
+    println!("[latency] stop_command_ms={:.1} success={}", started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
+    result
 }
 
 #[tauri::command]
@@ -104,7 +143,9 @@ pub async fn transcribe_and_insert(
     let _guard = TranscriptionGuard;
 
     // Load config
+    let config_started = Instant::now();
     let config = store::load_config(&app)?;
+    println!("[latency] config_load_ms={:.1}", config_started.elapsed().as_secs_f64() * 1000.0);
 
     // Validate Azure credentials
     if config.azure.speech_key.is_empty() {
@@ -112,7 +153,8 @@ pub async fn transcribe_and_insert(
     }
 
     // Transcribe audio with retry
-    let transcript = speech::transcribe_audio_with_retry(
+    let speech_started = Instant::now();
+    let transcript_result = speech::transcribe_audio_with_retry(
         audio_data,
         &config.azure.speech_key,
         &config.azure.speech_region,
@@ -120,7 +162,9 @@ pub async fn transcribe_and_insert(
         config.language.multilingual,
         2, // max retries (1 initial + 1 retry)
     )
-    .await?;
+    .await;
+    println!("[latency] speech_total_including_retries_ms={:.1} success={}", speech_started.elapsed().as_secs_f64() * 1000.0, transcript_result.is_ok());
+    let transcript = transcript_result?;
 
     log::info!("Transcription: {}", transcript);
 
@@ -131,6 +175,7 @@ pub async fn transcribe_and_insert(
 
     let mut warning: Option<String> = None;
 
+    let processing_started = Instant::now();
     let (final_text, polished) = if !config.azure.openai_key.is_empty()
         && !config.azure.openai_endpoint.is_empty()
     {
@@ -197,10 +242,15 @@ pub async fn transcribe_and_insert(
         (transcript.clone(), None)
     };
 
+    println!("[latency] post_processing_ms={:.1} mode={} warning={}", processing_started.elapsed().as_secs_f64() * 1000.0, mode, warning.is_some());
+
     // Insert into active window if enabled
     if config.features.auto_insert_enabled {
+        let insertion_started = Instant::now();
         let mut injector = state.injector.lock().await;
-        injector.inject_text(&final_text)?;
+        let insertion_result = injector.inject_text(&final_text);
+        println!("[latency] text_insertion_ms={:.1} success={}", insertion_started.elapsed().as_secs_f64() * 1000.0, insertion_result.is_ok());
+        insertion_result?;
     }
 
     Ok(TranscriptionResult {
@@ -241,6 +291,7 @@ pub async fn save_history_item(
     app: tauri::AppHandle,
     item: TranscriptionHistoryItem,
 ) -> Result<(), String> {
+    let started = Instant::now();
     use tauri_plugin_store::StoreExt;
 
     let store = app
@@ -268,6 +319,7 @@ pub async fn save_history_item(
         .map_err(|e| format!("Failed to save history store: {}", e))?;
 
     log::info!("History item saved to disk, total items: {}", history.len());
+    println!("[latency] background_history_save_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
 
     Ok(())
 }
@@ -323,6 +375,7 @@ pub async fn update_stats(
     characters: u32,
     duration_secs: f32,
 ) -> Result<(), String> {
+    let started = Instant::now();
     use tauri_plugin_store::StoreExt;
 
     let store = app
@@ -375,6 +428,7 @@ pub async fn update_stats(
         stats.total_transcriptions,
         stats.total_characters
     );
+    println!("[latency] background_stats_save_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
 
     Ok(())
 }

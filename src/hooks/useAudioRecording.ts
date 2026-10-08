@@ -4,6 +4,38 @@ import { useAppStore } from '../store/appStore';
 
 // Global lock to prevent concurrent operations
 let isOperationInProgress = false;
+let persistenceQueue = Promise.resolve();
+
+function queuePersistence(
+  item: {
+    original: string;
+    polished: string | null;
+    final_text: string;
+    timestamp: number;
+    audio_data: number[] | null;
+  },
+  durationSecs: number,
+) {
+  // Serialize read-modify-write operations without blocking the next recording.
+  persistenceQueue = persistenceQueue.then(async () => {
+    try {
+      await invoke('save_history_item', { item });
+    } catch (err) {
+      console.error('[useAudioRecording] Failed to save history item to backend:', err);
+      useAppStore.getState().setError(`History could not be saved: ${String(err)}`);
+    }
+
+    try {
+      await invoke('update_stats', {
+        characters: item.final_text.length,
+        durationSecs,
+      });
+    } catch (err) {
+      console.error('[useAudioRecording] Failed to update stats:', err);
+      useAppStore.getState().setError(`Usage statistics could not be saved: ${String(err)}`);
+    }
+  });
+}
 
 // Play a short beep sound using Web Audio API
 function playStartSound() {
@@ -120,6 +152,14 @@ export function useAudioRecording() {
     }
     isOperationInProgress = true;
     console.log('[useAudioRecording] stopRecording - starting...');
+    const releaseStarted = performance.now();
+    const stages: Array<{ stage: string; duration_ms: number }> = [];
+    const reportTiming = (success: boolean) => {
+      stages.push({ stage: 'release_handler_to_idle_ms', duration_ms: performance.now() - releaseStarted });
+      void invoke('report_latency', { stages, success }).catch((err) => {
+        console.error('Failed to report latency:', err);
+      });
+    };
 
     // Capture recording duration before clearing
     const capturedDuration = recordingDuration;
@@ -141,9 +181,11 @@ export function useAudioRecording() {
     let audioData: number[] | null = null;
 
     // Step 1: Stop recording (must always succeed to reset backend state)
+    const stopStarted = performance.now();
     try {
       console.log('[useAudioRecording] Calling invoke stop_recording...');
       audioData = await invoke<number[]>('stop_recording');
+      stages.push({ stage: 'stop_invoke_including_ipc_ms', duration_ms: performance.now() - stopStarted });
       console.log('[useAudioRecording] stop_recording returned, audio data length:', audioData?.length ?? 0);
       // Set upload size (audioData is array of bytes)
       if (audioData) {
@@ -157,6 +199,8 @@ export function useAudioRecording() {
       setUploadSize(null);
       setRecordingDuration(0);
       isOperationInProgress = false;
+      stages.push({ stage: 'stop_invoke_including_ipc_ms', duration_ms: performance.now() - stopStarted });
+      reportTiming(false);
       // Clear error message after 3 seconds
       setTimeout(() => {
         setError(null);
@@ -165,6 +209,8 @@ export function useAudioRecording() {
     }
 
     // Step 2: Transcribe (can fail independently)
+    let success = false;
+    const transcriptionStarted = performance.now();
     try {
       console.log('[useAudioRecording] Calling invoke transcribe_and_insert...');
       const result = await invoke<{
@@ -176,6 +222,9 @@ export function useAudioRecording() {
       }>('transcribe_and_insert', {
         audioData,
       });
+      stages.push({ stage: 'transcribe_insert_invoke_including_ipc_ms', duration_ms: performance.now() - transcriptionStarted });
+      stages.push({ stage: 'release_handler_to_result_ms', duration_ms: performance.now() - releaseStarted });
+      success = true;
       console.log('[useAudioRecording] Transcription result:', result.original.substring(0, 50) + '...');
       console.log('[useAudioRecording] Post-processing mode:', result.post_processing_mode);
       if (result.warning) {
@@ -188,37 +237,22 @@ export function useAudioRecording() {
         const timestamp = Date.now();
         // Update UI immediately
         addToHistory(result.original, result.polished, result.final_text, audioData ?? undefined, timestamp);
-        // Save to backend (writes to disk immediately)
-        try {
-          await invoke('save_history_item', {
-            item: {
-              original: result.original,
-              polished: result.polished,
-              final_text: result.final_text,
-              timestamp,
-              audio_data: audioData ?? null,
-            },
-          });
-          console.log('[useAudioRecording] History item saved to backend');
-        } catch (err) {
-          console.error('[useAudioRecording] Failed to save history item to backend:', err);
-        }
-        // Update usage stats
-        try {
-          await invoke('update_stats', {
-            characters: result.final_text.length,
-            durationSecs: capturedDuration,
-          });
-          console.log('[useAudioRecording] Stats updated');
-        } catch (err) {
-          console.error('[useAudioRecording] Failed to update stats:', err);
-        }
+        queuePersistence({
+          original: result.original,
+          polished: result.polished,
+          final_text: result.final_text,
+          timestamp,
+          audio_data: audioData,
+        }, capturedDuration);
       }
       setRecordingState('idle');
       setAudioLevel(0);
       setRecordingDuration(0);
       console.log('[useAudioRecording] stopRecording - completed successfully');
     } catch (err) {
+      if (!success) {
+        stages.push({ stage: 'transcribe_insert_invoke_including_ipc_ms', duration_ms: performance.now() - transcriptionStarted });
+      }
       console.error('[useAudioRecording] Failed to transcribe:', err);
       setError(err as string);
       setRecordingState('idle'); // Immediately return to idle so user can retry
@@ -230,6 +264,7 @@ export function useAudioRecording() {
       }, 3000);
     } finally {
       isOperationInProgress = false;
+      reportTiming(success);
     }
   }, [intervalId, durationIntervalId, recordingDuration, setRecordingState, setTranscription, setAudioLevel, setError, setUploadSize, setRecordingStartTime, setRecordingDuration, addToHistory]);
 
