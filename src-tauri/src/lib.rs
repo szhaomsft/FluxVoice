@@ -4,6 +4,7 @@ mod config;
 mod commands;
 mod hotkey;
 mod input;
+mod screen_context;
 
 use crate::audio::AudioRecorder;
 use crate::commands::AppState;
@@ -34,7 +35,11 @@ pub fn run() {
             ));
             let injector = Arc::new(Mutex::new(TextInjector::new()));
 
-            app.manage(AppState { recorder, injector });
+            app.manage(AppState {
+                recorder,
+                injector,
+                screen_context: Mutex::new(None),
+            });
 
             // Position main window
             if let Some(window) = app.get_webview_window("main") {

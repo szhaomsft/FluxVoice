@@ -289,6 +289,28 @@ export const ConfigPage: React.FC = () => {
                   />
                 </div>
 
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Screen Phrase Hints (Windows)
+                    </label>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Read accessible text from the active window when recording starts.
+                      Extracted words and phrases are sent to Azure Speech to improve recognition.
+                      Password controls are excluded, but other visible text may be sensitive.
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={localConfig.features.screenPhraseHintsEnabled}
+                    onChange={(checked) =>
+                      setLocalConfig({
+                        ...localConfig,
+                        features: { ...localConfig.features, screenPhraseHintsEnabled: checked },
+                      })
+                    }
+                  />
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
                     Speech Languages

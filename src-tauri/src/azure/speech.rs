@@ -24,6 +24,26 @@ struct Phrase {
 #[derive(Debug, Serialize)]
 struct TranscriptionDefinition {
     locales: Vec<String>,
+    #[serde(rename = "phraseList", skip_serializing_if = "Option::is_none")]
+    phrase_list: Option<PhraseList>,
+}
+
+#[derive(Debug, Serialize)]
+struct PhraseList {
+    phrases: Vec<String>,
+}
+
+fn transcription_definition(locales: Vec<String>, phrases: &[String]) -> TranscriptionDefinition {
+    TranscriptionDefinition {
+        locales,
+        phrase_list: if phrases.is_empty() {
+            None
+        } else {
+            Some(PhraseList {
+                phrases: phrases.to_vec(),
+            })
+        },
+    }
 }
 
 pub async fn transcribe_audio(
@@ -32,6 +52,7 @@ pub async fn transcribe_audio(
     region: &str,
     languages: &[String],  // Changed to support multiple languages
     multilingual: bool,     // When true, send empty locales for multi-lingual model
+    phrases: &[String],
 ) -> Result<String, String> {
     // Use Fast Transcription API with multi-language support
     let url = format!(
@@ -53,9 +74,7 @@ pub async fn transcribe_audio(
     };
 
     // Build definition with configured locales for auto-detection
-    let definition = TranscriptionDefinition {
-        locales,
-    };
+    let definition = transcription_definition(locales, phrases);
 
     let definition_json = serde_json::to_string(&definition)
         .map_err(|e| format!("Failed to serialize definition: {}", e))?;
@@ -135,6 +154,7 @@ pub async fn transcribe_audio_with_retry(
     region: &str,
     languages: &[String],  // Changed to support multiple languages
     multilingual: bool,     // When true, send empty locales for multi-lingual model
+    phrases: &[String],
     max_retries: u32,
 ) -> Result<String, String> {
     for attempt in 0..max_retries {
@@ -145,6 +165,7 @@ pub async fn transcribe_audio_with_retry(
             region,
             languages,
             multilingual,
+            phrases,
         )
         .await
         {
@@ -163,4 +184,33 @@ pub async fn transcribe_audio_with_retry(
         }
     }
     Err("Unexpected error in retry logic".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_hints_preserve_existing_request() {
+        let definition = transcription_definition(vec!["en-US".into()], &[]);
+        assert_eq!(
+            serde_json::to_value(definition).unwrap(),
+            serde_json::json!({"locales": ["en-US"]})
+        );
+    }
+
+    #[test]
+    fn hints_use_azure_phrase_list_schema_including_multilingual_mode() {
+        for locales in [vec!["en-US".into()], vec![]] {
+            let definition =
+                transcription_definition(locales.clone(), &["FluxVoice".into(), "Rehaan".into()]);
+            assert_eq!(
+                serde_json::to_value(definition).unwrap(),
+                serde_json::json!({
+                    "locales": locales,
+                    "phraseList": { "phrases": ["FluxVoice", "Rehaan"] }
+                })
+            );
+        }
+    }
 }
