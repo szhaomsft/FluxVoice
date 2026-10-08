@@ -27,6 +27,11 @@ pub fn report_latency(stages: Vec<LatencyStage>, success: bool) {
 // Global lock to prevent concurrent transcription operations
 static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
 
+#[tauri::command]
+pub fn get_build_commit() -> &'static str {
+    env!("FLUXVOICE_BUILD_COMMIT")
+}
+
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
