@@ -31,6 +31,8 @@ pub struct HotkeyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguageConfig {
+    #[serde(default)]
+    pub stt_model: SttModel,
     #[serde(default = "default_speech_languages")]
     pub speech_languages: Vec<String>,  // Changed from speech_language to support multiple languages
     #[serde(default)]
@@ -40,6 +42,15 @@ pub struct LanguageConfig {
     // Keep old field for backwards compatibility (will be migrated on save)
     #[serde(skip_serializing, default)]
     speech_language: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SttModel {
+    #[default]
+    Fast,
+    LlmSpeech,
+    MaiTranscribe2,
 }
 
 fn default_speech_languages() -> Vec<String> {
@@ -78,6 +89,8 @@ pub struct FeatureConfig {
     #[serde(default = "default_translate_target_language")]
     pub translate_target_language: String,  // e.g. "English", "Japanese"
     pub auto_insert_enabled: bool,
+    #[serde(default)]
+    pub screen_phrase_hints_enabled: bool,
     // Keep old field for backwards compatibility (will be migrated on save)
     #[serde(skip_serializing, default)]
     text_polishing_enabled: Option<bool>,
@@ -118,6 +131,7 @@ impl Default for AppConfig {
                 key: "Z".to_string(),
             },
             language: LanguageConfig {
+                stt_model: SttModel::Fast,
                 speech_languages: vec!["en-US".to_string()],
                 multilingual: false,
                 model_version: "latest".to_string(),
@@ -135,6 +149,7 @@ impl Default for AppConfig {
                 post_processing_mode: "none".to_string(),
                 translate_target_language: "English".to_string(),
                 auto_insert_enabled: true,
+                screen_phrase_hints_enabled: false,
                 text_polishing_enabled: None,
             },
         }
@@ -142,3 +157,50 @@ impl Default for AppConfig {
 }
 
 pub mod store;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn screen_hints_are_opt_in_for_new_and_existing_configs() {
+        let config = AppConfig::default();
+        assert!(!config.features.screen_phrase_hints_enabled);
+        let mut value = serde_json::to_value(config).unwrap();
+        value["features"]
+            .as_object_mut()
+            .unwrap()
+            .remove("screenPhraseHintsEnabled");
+        let restored: AppConfig = serde_json::from_value(value).unwrap();
+        assert!(!restored.features.screen_phrase_hints_enabled);
+    }
+
+    #[test]
+    fn old_configuration_defaults_to_fast_stt() {
+        let language: LanguageConfig = serde_json::from_value(json!({
+            "speechLanguages": ["en-US", "zh-CN"],
+            "multilingual": false,
+            "modelVersion": "latest"
+        })).unwrap();
+        assert_eq!(language.stt_model, SttModel::Fast);
+        assert_eq!(language.speech_languages, vec!["en-US", "zh-CN"]);
+    }
+
+    #[test]
+    fn model_selection_round_trips_and_rejects_unknown_models() {
+        for (model, name) in [
+            (SttModel::Fast, "fast"),
+            (SttModel::LlmSpeech, "llmSpeech"),
+            (SttModel::MaiTranscribe2, "maiTranscribe2"),
+        ] {
+            let mut config = AppConfig::default();
+            config.language.stt_model = model;
+            let value = serde_json::to_value(&config).unwrap();
+            assert_eq!(value["language"]["sttModel"], name);
+            let loaded: AppConfig = serde_json::from_value(value).unwrap();
+            assert_eq!(loaded.language.stt_model, model);
+        }
+        assert!(serde_json::from_value::<SttModel>(json!("unknown")).is_err());
+    }
+}

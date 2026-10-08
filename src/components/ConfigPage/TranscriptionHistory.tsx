@@ -3,6 +3,7 @@ import { Clock, Copy, Check, Trash2, Sparkles, Play, Square, Download } from 'lu
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { useTranscriptionHistory } from '../../hooks/useTranscriptionHistory';
+import { getAudioFormat } from '../../utils/audioStorage';
 
 function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
@@ -53,7 +54,14 @@ export const TranscriptionHistory: React.FC = () => {
 
     // Convert number array to Uint8Array and create blob
     const uint8Array = new Uint8Array(audioData);
-    const blob = new Blob([uint8Array], { type: 'audio/ogg; codecs=opus' });
+    let mimeType: string;
+    try {
+      mimeType = getAudioFormat(audioData).mimeType;
+    } catch (err) {
+      console.error('Failed to play audio:', err);
+      return;
+    }
+    const blob = new Blob([uint8Array], { type: mimeType });
     const url = URL.createObjectURL(blob);
 
     const audio = new Audio(url);
@@ -92,13 +100,13 @@ export const TranscriptionHistory: React.FC = () => {
   const handleSaveAudio = async (audioData: number[], timestamp: number) => {
     // Create filename with timestamp
     const date = new Date(timestamp);
-    const defaultFilename = `fluxvoice_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}.ogg`;
-
     try {
+      const { extension } = getAudioFormat(audioData);
+      const defaultFilename = `fluxvoice_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}_${String(date.getHours()).padStart(2, '0')}${String(date.getMinutes()).padStart(2, '0')}${String(date.getSeconds()).padStart(2, '0')}.${extension}`;
       // Open save dialog
       const filePath = await save({
         defaultPath: defaultFilename,
-        filters: [{ name: 'Audio', extensions: ['ogg'] }],
+        filters: [{ name: 'Audio', extensions: [extension] }],
       });
 
       if (filePath) {

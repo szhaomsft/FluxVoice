@@ -229,6 +229,7 @@ export function useAudioRecording() {
       console.log('[useAudioRecording] Post-processing mode:', result.post_processing_mode);
       if (result.warning) {
         console.warn('[useAudioRecording] Post-processing warning:', result.warning);
+        setError(result.warning);
       }
 
       setTranscription(result.final_text);

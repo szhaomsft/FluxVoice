@@ -21,10 +21,13 @@ export interface HotkeyConfig {
 }
 
 export interface LanguageConfig {
+  sttModel: SttModel;
   speechLanguages: string[];  // Changed from speechLanguage to support multiple languages
   multilingual: boolean;      // When true, use multi-lingual model (auto-detects languages)
   modelVersion: string;
 }
+
+export type SttModel = 'fast' | 'llmSpeech' | 'maiTranscribe2';
 
 export interface UIConfig {
   positionX: number;
@@ -39,6 +42,7 @@ export interface FeatureConfig {
   postProcessingMode: 'none' | 'polish' | 'translate';
   translateTargetLanguage: string;  // e.g. "English", "Japanese"
   autoInsertEnabled: boolean;
+  screenPhraseHintsEnabled: boolean;
 }
 
 export type RecordingState = 'idle' | 'recording' | 'processing' | 'error';

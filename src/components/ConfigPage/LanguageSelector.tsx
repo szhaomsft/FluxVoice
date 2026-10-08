@@ -90,11 +90,13 @@ const AVAILABLE_LOCALES = [
 interface LanguageSelectorProps {
   selectedLanguages: string[];
   onChange: (languages: string[]) => void;
+  singleSelect?: boolean;
 }
 
 export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   selectedLanguages,
   onChange,
+  singleSelect = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -111,6 +113,11 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   }, []);
 
   const toggleLanguage = (code: string) => {
+    if (singleSelect) {
+      onChange([code]);
+      setIsOpen(false);
+      return;
+    }
     if (selectedLanguages.includes(code)) {
       // Don't allow removing the last language
       if (selectedLanguages.length > 1) {
