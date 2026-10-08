@@ -5,7 +5,7 @@ A voice input method application with Azure Speech transcription and OpenAI poli
 ## Features
 
 - **Always-on-top floating window** - Minimal, transparent UI that stays visible
-- **Global hotkey activation** - Press Ctrl+Shift+Z to start/stop recording
+- **Global hotkey activation** - Hold Ctrl+Shift+Z, or choose Caps Lock on Windows, to record
 - **Azure Fast Transcription** - Real-time speech-to-text using Azure Cognitive Services
 - **Multilingual Transcription** - Auto-detects and transcribes across multiple languages continuously (de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN)
 - **AI Text Polishing** - Optional enhancement with Azure OpenAI (configurable model deployment)
@@ -59,7 +59,18 @@ Enable it in **Settings → Speech Languages → Multilingual** toggle.
 
 ### Hotkey
 
-Default hotkey is **Ctrl+Shift+Z**. Press once to start recording, press again to stop.
+Default hotkey is **Ctrl+Shift+Z**. Hold the shortcut to record, then release it
+to stop and transcribe.
+
+For a single key close to your left hand on Windows, open **Settings > General
+Settings > Recording Shortcut**, select **Caps Lock**, and click **Save
+Configuration**. The change takes effect immediately and is saved for future
+launches. Hold Caps Lock to record and release it to transcribe. While this
+shortcut is active, FluxVoice consumes physical Caps Lock presses globally so
+they do not toggle capitalization; the existing Caps Lock on/off state is
+preserved. Other keys and software-generated key events are unaffected. Switch
+back to **Ctrl + Shift + Z** and save, or exit FluxVoice, to restore normal Caps
+Lock behavior. Release the recording shortcut before changing it.
 
 ### Screen Phrase Hints (Windows)
 
@@ -87,9 +98,9 @@ on the language and model, including multilingual mode.
 ## Usage
 
 1. Launch FluxVoice - a small floating window will appear
-2. Press **Ctrl+Shift+Z** to start voice recording
+2. Hold your recording shortcut (**Ctrl+Shift+Z** by default)
 3. Speak clearly into your microphone
-4. Press **Ctrl+Shift+Z** again to stop recording
+4. Release the shortcut to stop recording
 5. Text will be transcribed, polished (if enabled), and auto-inserted
 
 ## Architecture

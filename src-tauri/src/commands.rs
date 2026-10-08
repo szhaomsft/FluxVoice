@@ -2,10 +2,11 @@ use crate::audio::AudioRecorder;
 use crate::azure::{openai, speech};
 use crate::config::{store, AppConfig};
 use crate::input::TextInjector;
+use crate::hotkey::{parse_hotkey, HotkeyManager};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -77,7 +78,38 @@ pub async fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
-    store::save_config(&app, &config)
+    let (modifiers, key) = parse_hotkey(&config.hotkey)?;
+    let manager = app.try_state::<Arc<Mutex<HotkeyManager>>>()
+        .ok_or_else(|| "Recording shortcut manager is unavailable".to_string())?;
+    let mut manager = manager.lock().await;
+    let previous = store::load_config(&app)?;
+    let changed = previous.hotkey != config.hotkey;
+    if changed {
+        manager.register(modifiers, key).await?;
+    }
+    if let Err(error) = store::save_config(&app, &config) {
+        let mut rollback_errors = Vec::new();
+        if changed {
+            let rollback = match parse_hotkey(&previous.hotkey) {
+                Ok((modifiers, key)) => manager.register(modifiers, key).await,
+                Err(error) => Err(error),
+            };
+            if let Err(rollback_error) = rollback {
+                log::error!("Failed to restore recording shortcut: {}", rollback_error);
+                rollback_errors.push(rollback_error);
+            }
+        }
+        if let Err(rollback_error) = store::save_config(&app, &previous) {
+            log::error!("Failed to restore previous configuration: {}", rollback_error);
+            rollback_errors.push(rollback_error);
+        }
+        return Err(if rollback_errors.is_empty() {
+            error
+        } else {
+            format!("{}; rollback failed: {}", error, rollback_errors.join("; "))
+        });
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -20,7 +20,7 @@ pub struct AzureConfig {
     pub openai_deployment: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HotkeyConfig {
     pub modifier1: String,
