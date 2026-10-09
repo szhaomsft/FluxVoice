@@ -132,6 +132,19 @@ text. Capture failures produce a warning without preventing transcription.
 Hints bias recognition rather than guarantee it; their effectiveness depends
 on the language and model, including multilingual mode.
 
+### Tiny Status Mode
+
+Click the shrink button in the floating window to switch to a **32 x 32 logical
+pixel** indicator. It keeps the same recording shortcut and always-on-top
+behavior, showing ready (amber), recording (pulsing red microphone), processing
+(pulsing blue upload icon), and error (red alert) states. Hover for status
+details, recording duration, errors, and the build version.
+
+Double-click the indicator (or focus it and press Enter/Space) to expand back
+to the normal window. Right-click it to open settings, or drag it to reposition.
+The mode is saved across restarts; existing installations stay in normal mode
+until you opt in. Expanding near a screen edge keeps the window on-screen.
+
 ## Usage
 
 1. Launch FluxVoice - a small floating window will appear
