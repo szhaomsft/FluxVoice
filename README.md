@@ -160,6 +160,12 @@ uncommitted changes at build time. Builds without Git metadata display
 - **Text not inserting**: Enable auto-insert in settings, ensure target app accepts input
 - **Hotkey not working**: Check for conflicts with other applications
 
+On Windows, other always-on-top applications can cover the floating window.
+FluxVoice re-raises its visible window when the foreground application changes,
+without taking keyboard focus from your dictation target. Pressing the recording
+shortcut also shows and restores the window if it was hidden or minimized.
+Secure desktops and other Windows-managed overlays can still take precedence.
+
 ### Measuring recognition latency
 
 Run `npm run tauri dev` and make a normal recording. Lines prefixed with
