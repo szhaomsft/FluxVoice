@@ -5,6 +5,8 @@ mod commands;
 mod hotkey;
 mod input;
 mod screen_context;
+#[cfg(windows)]
+mod floating_window;
 
 use crate::audio::AudioRecorder;
 use crate::commands::AppState;
@@ -101,7 +103,16 @@ pub fn run() {
                     }
 
                     // Show window after positioning
-                    let _ = window_clone.show();
+                    #[cfg(windows)]
+                    let shown = window_clone
+                        .hwnd()
+                        .map_err(|error| error.to_string())
+                        .and_then(|handle| floating_window::raise_window(handle.0 as usize));
+                    #[cfg(not(windows))]
+                    let shown = window_clone.show().map_err(|error| error.to_string());
+                    if let Err(error) = shown {
+                        log::error!("Could not show floating window: {}", error);
+                    }
                 });
             }
 
