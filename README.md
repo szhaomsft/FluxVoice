@@ -10,6 +10,7 @@ A voice input method application with Azure Speech transcription and OpenAI poli
 - **Multilingual Transcription** - Auto-detects and transcribes across multiple languages continuously (de-DE, en-AU, en-CA, en-GB, en-IN, en-US, es-ES, es-MX, fr-CA, fr-FR, it-IT, ja-JP, ko-KR, zh-CN)
 - **AI Text Polishing** - Optional enhancement with Azure OpenAI (configurable model deployment)
 - **Auto-insertion** - Automatically paste transcribed text into active windows
+- **Screen phrase hints (Windows)** - Optional UI Automation context to improve recognition of on-screen terms
 - **Waveform visualization** - Real-time audio level display while recording
 - **Configurable settings** - Full customization of Azure credentials, hotkeys, and preferences
 
@@ -54,6 +55,28 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
+
+## Automated Builds
+
+The **Build and Release** GitHub Actions workflow checks the default branch
+(`main`) daily at **00:00 UTC / 08:00 Beijing time**. GitHub may delay scheduled
+runs; the schedule becomes active when the workflow is on the default branch.
+
+If the head commit matches the last published nightly, it skips building.
+Otherwise, it builds Windows installers and macOS installers for Apple Silicon
+and Intel from the same pinned commit, then publishes a prerelease tagged
+`nightly-YYYY-MM-DD-COMMIT`. A failed build or upload does not publish the
+nightly; an unfinished draft is not treated as a successful build.
+
+Download nightly installers from the repository's
+[Releases page](https://github.com/szhaomsft/FluxVoice/releases). Nightlies do not
+replace the latest stable release or bump the app version; the floating
+window's embedded commit identifies the build. Pushing a `v*` tag still
+publishes a stable release.
+
+To check for a nightly manually, run the workflow from the Actions tab with
+**publish_nightly** enabled. Leaving it disabled retains the existing
+artifact-only manual build.
 
 ## Configuration
 
@@ -125,6 +148,43 @@ preserved. Other keys and software-generated key events are unaffected. Switch
 back to **Ctrl + Shift + Z** and save, or exit FluxVoice, to restore normal Caps
 Lock behavior. Release the recording shortcut before changing it.
 
+### Screen Phrase Hints (Windows)
+
+Enable **Settings > General Settings > Screen Phrase Hints (Windows)** and save.
+This feature is off by default, including for existing configurations. At recording
+startup, FluxVoice uses Windows UI Automation on a separate thread to read
+accessible, on-screen text in the foreground window. It prioritizes the focused
+control and extracts up to 100 deduplicated words and short phrases for Azure
+the selected STT model's `phraseList` (Fast, LLM Speech, or MAI-Transcribe-2).
+It does not use screenshots or OCR.
+
+**Privacy:** Extracted phrases are sent to your configured Azure Speech service
+with the audio. UI Automation password controls and their descendants are
+excluded; capture is skipped when a password control is focused or FluxVoice
+itself is foreground. Other accessible text can still contain sensitive
+information, and controls that do not identify themselves as passwords cannot
+be reliably filtered. Screen context is kept in memory for the current recording
+only and is not added to history or logs.
+
+Capture is bounded by time, text size, and element count. Unsupported apps,
+elevated windows, and custom-rendered controls may expose little or no accessible
+text. Capture failures produce a warning without preventing transcription.
+Hints bias recognition rather than guarantee it; their effectiveness depends
+on the language and model, including multilingual mode.
+
+### Tiny Status Mode
+
+Click the shrink button in the floating window to switch to a **32 x 32 logical
+pixel** indicator. It keeps the same recording shortcut and always-on-top
+behavior, showing ready (amber), recording (pulsing red microphone), processing
+(pulsing blue upload icon), and error (red alert) states. Hover for status
+details, recording duration, errors, and the build version.
+
+Double-click the indicator (or focus it and press Enter/Space) to expand back
+to the normal window. Right-click it to open settings, or drag it to reposition.
+The mode is saved across restarts; existing installations stay in normal mode
+until you opt in. Expanding near a screen edge keeps the window on-screen.
+
 ## Usage
 
 1. Launch FluxVoice - a small floating window will appear
@@ -142,10 +202,22 @@ Lock behavior. Release the recording shortcut before changing it.
 
 ## Troubleshooting
 
+The floating window displays its version and build commit, for example
+`v0.2.2 (bb8374cc)`. The commit is embedded at build time, so it identifies the
+running build rather than the current checkout. A `-dirty` suffix indicates
+uncommitted changes at build time. Builds without Git metadata display
+`unknown` instead of a commit ID and emit a build warning.
+
 - **No audio**: Check microphone permissions and default device
 - **Transcription errors**: Verify Azure credentials and internet connection
 - **Text not inserting**: Enable auto-insert in settings, ensure target app accepts input
 - **Hotkey not working**: Check for conflicts with other applications
+
+On Windows, other always-on-top applications can cover the floating window.
+FluxVoice re-raises its visible window when the foreground application changes,
+without taking keyboard focus from your dictation target. Pressing the recording
+shortcut also shows and restores the window if it was hidden or minimized.
+Secure desktops and other Windows-managed overlays can still take precedence.
 
 ### Measuring recognition latency
 

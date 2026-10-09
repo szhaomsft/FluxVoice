@@ -89,6 +89,8 @@ pub struct FeatureConfig {
     #[serde(default = "default_translate_target_language")]
     pub translate_target_language: String,  // e.g. "English", "Japanese"
     pub auto_insert_enabled: bool,
+    #[serde(default)]
+    pub screen_phrase_hints_enabled: bool,
     // Keep old field for backwards compatibility (will be migrated on save)
     #[serde(skip_serializing, default)]
     text_polishing_enabled: Option<bool>,
@@ -147,6 +149,7 @@ impl Default for AppConfig {
                 post_processing_mode: "none".to_string(),
                 translate_target_language: "English".to_string(),
                 auto_insert_enabled: true,
+                screen_phrase_hints_enabled: false,
                 text_polishing_enabled: None,
             },
         }
@@ -159,6 +162,19 @@ pub mod store;
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn screen_hints_are_opt_in_for_new_and_existing_configs() {
+        let config = AppConfig::default();
+        assert!(!config.features.screen_phrase_hints_enabled);
+        let mut value = serde_json::to_value(config).unwrap();
+        value["features"]
+            .as_object_mut()
+            .unwrap()
+            .remove("screenPhraseHintsEnabled");
+        let restored: AppConfig = serde_json::from_value(value).unwrap();
+        assert!(!restored.features.screen_phrase_hints_enabled);
+    }
 
     #[test]
     fn old_configuration_defaults_to_fast_stt() {

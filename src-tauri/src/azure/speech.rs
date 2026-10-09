@@ -25,8 +25,15 @@ struct Phrase {
 #[derive(Debug, Serialize)]
 struct TranscriptionDefinition {
     locales: Vec<String>,
+    #[serde(rename = "phraseList", skip_serializing_if = "Option::is_none")]
+    phrase_list: Option<PhraseList>,
     #[serde(rename = "enhancedMode", skip_serializing_if = "Option::is_none")]
     enhanced_mode: Option<EnhancedMode>,
+}
+
+#[derive(Debug, Serialize)]
+struct PhraseList {
+    phrases: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,7 +45,7 @@ struct EnhancedMode {
     model: Option<&'static str>,
 }
 
-fn build_definition(language: &LanguageConfig) -> Result<TranscriptionDefinition, String> {
+fn build_definition(language: &LanguageConfig, phrases: &[String]) -> Result<TranscriptionDefinition, String> {
     let mut locales = if language.multilingual {
         Vec::new()
     } else {
@@ -71,11 +78,16 @@ fn build_definition(language: &LanguageConfig) -> Result<TranscriptionDefinition
             model: Some("MAI-Transcribe-2"),
         }),
     };
-    Ok(TranscriptionDefinition { locales, enhanced_mode })
+    let phrase_list = if phrases.is_empty() {
+        None
+    } else {
+        Some(PhraseList { phrases: phrases.to_vec() })
+    };
+    Ok(TranscriptionDefinition { locales, enhanced_mode, phrase_list })
 }
 
 pub fn validate_model_settings(language: &LanguageConfig) -> Result<(), String> {
-    build_definition(language).map(|_| ())
+    build_definition(language, &[]).map(|_| ())
 }
 
 fn audio_content_type(audio_data: &[u8], model: SttModel) -> Result<(&'static str, &'static str), String> {
@@ -92,6 +104,7 @@ pub async fn transcribe_audio(
     subscription_key: &str,
     region: &str,
     language: &LanguageConfig,
+    phrases: &[String],
 ) -> Result<String, String> {
     // Use Fast Transcription API with multi-language support
     let url = format!(
@@ -101,7 +114,7 @@ pub async fn transcribe_audio(
 
     let client = get_http_client();
 
-    let definition = build_definition(language)?;
+    let definition = build_definition(language, phrases)?;
     let (file_name, mime_type) = audio_content_type(&audio_data, language.stt_model)?;
     println!("[latency] speech_model={:?} locales={:?} audio_format={}", language.stt_model, definition.locales, mime_type);
 
@@ -182,6 +195,7 @@ pub async fn transcribe_audio_with_retry(
     subscription_key: &str,
     region: &str,
     language: &LanguageConfig,
+    phrases: &[String],
     max_retries: u32,
 ) -> Result<String, String> {
     validate_model_settings(language)?;
@@ -193,6 +207,7 @@ pub async fn transcribe_audio_with_retry(
             subscription_key,
             region,
             language,
+            phrases,
         )
         .await
         {
@@ -234,7 +249,7 @@ mod tests {
             (SttModel::LlmSpeech, Some(json!({"enabled": true, "task": "transcribe"}))),
             (SttModel::MaiTranscribe2, Some(json!({"enabled": true, "model": "MAI-Transcribe-2"}))),
         ] {
-            let definition = build_definition(&language(model, true, &["en-US", "zh-CN"])).unwrap();
+            let definition = build_definition(&language(model, true, &["en-US", "zh-CN"]), &[]).unwrap();
             let actual = serde_json::to_value(definition).unwrap();
             let expected = match enhanced {
                 Some(enhanced) => json!({"locales": [], "enhancedMode": enhanced}),
@@ -247,7 +262,7 @@ mod tests {
     #[test]
     fn fast_and_llm_preserve_configured_locale_candidates() {
         for model in [SttModel::Fast, SttModel::LlmSpeech] {
-            let definition = build_definition(&language(model, false, &["en-US", "zh-CN"])).unwrap();
+            let definition = build_definition(&language(model, false, &["en-US", "zh-CN"]), &[]).unwrap();
             assert_eq!(definition.locales, vec!["en-US", "zh-CN"]);
         }
     }
@@ -259,14 +274,14 @@ mod tests {
             (vec!["zh-CN"], "zh"),
             (vec!["zh-HK"], "yue"),
         ] {
-            let definition = build_definition(&language(SttModel::MaiTranscribe2, false, &locales)).unwrap();
+            let definition = build_definition(&language(SttModel::MaiTranscribe2, false, &locales), &[]).unwrap();
             assert_eq!(definition.locales, vec![expected]);
         }
     }
 
     #[test]
     fn mai_rejects_multiple_language_hints() {
-        let result = build_definition(&language(SttModel::MaiTranscribe2, false, &["en-US", "zh-CN"]));
+        let result = build_definition(&language(SttModel::MaiTranscribe2, false, &["en-US", "zh-CN"]), &[]);
         assert!(result.unwrap_err().contains("enable Multilingual"));
     }
 
@@ -282,5 +297,21 @@ mod tests {
         assert!(audio_content_type(&[0xff, 0xff, 0xff, 0xff], SttModel::MaiTranscribe2).is_err());
         assert!(audio_content_type(b"RIFF", SttModel::MaiTranscribe2).is_err());
         assert!(audio_content_type(b"invalid", SttModel::Fast).is_err());
+    }
+    #[test]
+    fn hints_preserve_model_selection_and_normalized_locales() {
+        for model in [SttModel::Fast, SttModel::LlmSpeech, SttModel::MaiTranscribe2] {
+            for multilingual in [false, true] {
+                let language = language(model, multilingual, &["en-US"]);
+                let baseline = serde_json::to_value(build_definition(&language, &[]).unwrap()).unwrap();
+                assert!(baseline.get("phraseList").is_none());
+                let actual = serde_json::to_value(
+                    build_definition(&language, &["FluxVoice".into(), "Rehaan".into()]).unwrap()
+                ).unwrap();
+                let mut expected = baseline;
+                expected["phraseList"] = json!({"phrases": ["FluxVoice", "Rehaan"]});
+                assert_eq!(actual, expected);
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "flux-voice"
-version = "0.2.2"
+version = "0.2.3"
 description = "Voice input method with Azure transcription and OpenAI polishing"
 authors = ["FluxVoice Team"]
 edition = "2021"
@@ -44,7 +44,7 @@ minimp3 = "0.6.1"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.0"
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_System_Com"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 arboard = "3"

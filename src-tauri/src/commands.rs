@@ -27,9 +27,15 @@ pub fn report_latency(stages: Vec<LatencyStage>, success: bool) {
 // Global lock to prevent concurrent transcription operations
 static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
 
+#[tauri::command]
+pub fn get_build_commit() -> &'static str {
+    env!("FLUXVOICE_BUILD_COMMIT")
+}
+
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
+    pub screen_context: Mutex<Option<Result<crate::screen_context::Capture, String>>>,
     pub recording_config: Mutex<Option<AppConfig>>,
 }
 
@@ -54,6 +60,82 @@ pub struct TranscriptionHistoryItem {
 const HISTORY_STORE_FILE: &str = "history.json";
 const STATS_STORE_FILE: &str = "stats.json";
 const WINDOW_STORE_FILE: &str = "window.json";
+
+fn compact_mode_from_value(value: Option<serde_json::Value>) -> Result<bool, String> {
+    match value {
+        None => Ok(false),
+        Some(value) => value.as_bool()
+            .ok_or_else(|| "Invalid compact window mode in window settings".to_string()),
+    }
+}
+
+fn floating_window_dimensions(compact: bool) -> (u32, u32) {
+    if compact { (32, 32) } else { (300, 100) }
+}
+
+pub(crate) fn resize_floating_window(window: &tauri::WebviewWindow, compact: bool) -> Result<(), String> {
+    let (width, height) = floating_window_dimensions(compact);
+    let size = tauri::LogicalSize::new(width as f64, height as f64);
+    window.set_size(size).map_err(|error| format!("Could not resize floating window: {error}"))?;
+    if let Some(monitor) = window.current_monitor().map_err(|error| error.to_string())? {
+        let position = window.outer_position().map_err(|error| error.to_string())?;
+        let physical_size = window.outer_size().map_err(|error| error.to_string())?;
+        let origin = monitor.position();
+        let bounds = monitor.size();
+        let right = origin.x + bounds.width.saturating_sub(physical_size.width) as i32;
+        let bottom = origin.y + bounds.height.saturating_sub(physical_size.height) as i32;
+        let visible_position = tauri::PhysicalPosition::new(
+            position.x.clamp(origin.x, right),
+            position.y.clamp(origin.y, bottom),
+        );
+        if position != visible_position {
+            window.set_position(visible_position).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_compact_mode(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_store::StoreExt;
+    let store = app.store(WINDOW_STORE_FILE).map_err(|error| error.to_string())?;
+    compact_mode_from_value(store.get("compact_mode"))
+}
+
+#[tauri::command]
+pub async fn set_compact_mode(app: tauri::AppHandle, compact: bool) -> Result<bool, String> {
+    use tauri_plugin_store::StoreExt;
+    let window = app.get_webview_window("main")
+        .ok_or_else(|| "Floating window is unavailable".to_string())?;
+    let store = app.store(WINDOW_STORE_FILE).map_err(|error| error.to_string())?;
+    let previous = compact_mode_from_value(store.get("compact_mode"))?;
+    let previous_size = window.inner_size().map_err(|error| error.to_string())?;
+    let previous_position = window.outer_position().map_err(|error| error.to_string())?;
+    let result = resize_floating_window(&window, compact).and_then(|()| {
+        store.set("compact_mode", serde_json::json!(compact));
+        store.save().map_err(|error| format!("Could not save window mode: {error}"))
+    });
+    if let Err(error) = result {
+        store.set("compact_mode", serde_json::json!(previous));
+        let mut rollback_errors = Vec::new();
+        for rollback in [
+            window.set_size(previous_size).map_err(|error| error.to_string()),
+            window.set_position(previous_position).map_err(|error| error.to_string()),
+            store.save().map_err(|error| error.to_string()),
+        ] {
+            if let Err(rollback_error) = rollback {
+                log::error!("Could not restore previous window mode: {}", rollback_error);
+                rollback_errors.push(rollback_error);
+            }
+        }
+        return Err(if rollback_errors.is_empty() {
+            error
+        } else {
+            format!("{}; rollback failed: {}", error, rollback_errors.join("; "))
+        });
+    }
+    Ok(compact)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DailyStats {
@@ -117,9 +199,18 @@ pub async fn save_config_cmd(app: tauri::AppHandle, config: AppConfig) -> Result
 pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let config = store::load_config(&app)?;
     speech::validate_model_settings(&config.language)?;
+    let mut screen_context = state.screen_context.lock().await;
+    *screen_context = None;
+    let capture = if config.features.screen_phrase_hints_enabled {
+        Some(crate::screen_context::start_capture())
+    } else {
+        None
+    };
     let mut recorder = state.recorder.lock().await;
     recorder.start_recording()?;
     *state.recording_config.lock().await = Some(config.clone());
+    *screen_context = capture;
+    drop(screen_context);
     drop(recorder);
     tauri::async_runtime::spawn(async move {
         let openai_endpoint = if config.features.post_processing_mode != "none"
@@ -145,6 +236,11 @@ pub async fn stop_recording(state: State<'_, AppState>) -> Result<Vec<u8>, Strin
     let use_mp3 = state.recording_config.lock().await.as_ref()
         .is_some_and(|config| config.language.stt_model == SttModel::MaiTranscribe2);
     let result = recorder.stop_recording(use_mp3);
+    drop(recorder);
+    if result.is_err() {
+        state.screen_context.lock().await.take();
+        state.recording_config.lock().await.take();
+    }
     println!("[latency] stop_command_ms={:.1} success={}", started.elapsed().as_secs_f64() * 1000.0, result.is_ok());
     result
 }
@@ -175,6 +271,7 @@ pub async fn transcribe_and_insert(
         }
     }
     let _guard = TranscriptionGuard;
+    let capture = state.screen_context.lock().await.take();
 
     // Load config
     let config_started = Instant::now();
@@ -189,6 +286,25 @@ pub async fn transcribe_and_insert(
         return Err("Azure Speech key not configured".to_string());
     }
 
+    let mut warnings = Vec::new();
+    let phrases = if config.features.screen_phrase_hints_enabled {
+        let result = match capture {
+            Some(Ok(capture)) => capture.finish().await,
+            Some(Err(error)) => Err(error),
+            None => Ok(Vec::new()),
+        };
+        match result {
+            Ok(phrases) => phrases,
+            Err(error) => {
+                log::warn!("Screen phrase hints unavailable: {}", error);
+                warnings.push(format!("Screen phrase hints unavailable: {}", error));
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
     // Transcribe audio with retry
     let speech_started = Instant::now();
     let transcript_result = speech::transcribe_audio_with_retry(
@@ -196,6 +312,7 @@ pub async fn transcribe_and_insert(
         &config.azure.speech_key,
         &config.azure.speech_region,
         &config.language,
+        &phrases,
         2, // max retries (1 initial + 1 retry)
     )
     .await;
@@ -208,8 +325,6 @@ pub async fn transcribe_and_insert(
     let mode = config.features.post_processing_mode.clone();
     log::info!(">>> Post-processing mode from config: '{}'", mode);
     println!(">>> Post-processing mode from config: '{}'", mode);
-
-    let mut warning: Option<String> = None;
 
     let processing_started = Instant::now();
     let (final_text, polished) = if !config.azure.openai_key.is_empty()
@@ -235,7 +350,7 @@ pub async fn transcribe_and_insert(
                     Err(e) => {
                         log::warn!(">>> Failed to polish text: {}. Using original transcript.", e);
                         println!(">>> Failed to polish text: {}. Using original.", e);
-                        warning = Some(format!("Polish failed: {}", e));
+                        warnings.push(format!("Polish failed: {}", e));
                         (transcript.clone(), None)
                     }
                 }
@@ -261,7 +376,7 @@ pub async fn transcribe_and_insert(
                     Err(e) => {
                         log::warn!(">>> Failed to translate text: {}. Using original transcript.", e);
                         println!(">>> Failed to translate text: {}. Using original.", e);
-                        warning = Some(format!("Translation failed: {}", e));
+                        warnings.push(format!("Translation failed: {}", e));
                         (transcript.clone(), None)
                     }
                 }
@@ -278,6 +393,11 @@ pub async fn transcribe_and_insert(
         (transcript.clone(), None)
     };
 
+    let warning = if warnings.is_empty() {
+        None
+    } else {
+        Some(warnings.join("; "))
+    };
     println!("[latency] post_processing_ms={:.1} mode={} warning={}", processing_started.elapsed().as_secs_f64() * 1000.0, mode, warning.is_some());
 
     // Insert into active window if enabled
@@ -562,4 +682,23 @@ pub async fn load_window_position(app: tauri::AppHandle) -> Result<Option<Window
         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
     Ok(position)
+}
+
+#[cfg(test)]
+mod window_mode_tests {
+    use super::*;
+
+    #[test]
+    fn tiny_mode_is_exactly_32_logical_pixels() {
+        assert_eq!(floating_window_dimensions(true), (32, 32));
+        assert_eq!(floating_window_dimensions(false), (300, 100));
+    }
+
+    #[test]
+    fn existing_window_settings_default_to_normal_mode() {
+        assert!(!compact_mode_from_value(None).unwrap());
+        assert!(compact_mode_from_value(Some(serde_json::json!(true))).unwrap());
+        assert!(!compact_mode_from_value(Some(serde_json::json!(false))).unwrap());
+        assert!(compact_mode_from_value(Some(serde_json::json!("invalid"))).is_err());
+    }
 }

@@ -4,20 +4,93 @@ on:
   push:
     tags:
       - 'v*'
+  schedule:
+    - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      publish_nightly:
+        description: 'Publish a nightly prerelease if the default branch has changed'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ (github.event_name == 'schedule' || inputs.publish_nightly) && 'nightly' || github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.plan.outputs.should_build }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      nightly: ${{ steps.plan.outputs.nightly }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      release_name: ${{ steps.plan.outputs.release_name }}
+    steps:
+      - name: Plan build
+        id: plan
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const nightly = context.eventName === 'schedule'
+              || String(context.payload.inputs?.publish_nightly) === 'true';
+            core.setOutput('nightly', String(nightly));
+            core.setOutput('should_build', 'false');
+
+            let sha = context.sha;
+            if (nightly) {
+              const branch = context.payload.repository.default_branch;
+              const head = await github.rest.repos.getBranch({ owner, repo, branch });
+              sha = head.data.commit.sha;
+              const releases = await github.paginate(
+                github.rest.repos.listReleases,
+                { owner, repo, per_page: 100 },
+                (response, done) => {
+                  const latest = response.data.find(release =>
+                    !release.draft && release.prerelease && release.tag_name.startsWith('nightly-'));
+                  if (latest) {
+                    done();
+                    return [latest];
+                  }
+                  return [];
+                }
+              );
+              if (releases.length) {
+                const previous = await github.rest.repos.getCommit({
+                  owner, repo, ref: releases[0].tag_name
+                });
+                if (previous.data.sha === sha) {
+                  core.info(`Skipping nightly: ${branch} is still at ${sha}.`);
+                  return;
+                }
+              }
+              const date = new Date().toISOString().slice(0, 10);
+              const shortSha = sha.slice(0, 8);
+              core.setOutput('release_tag', `nightly-${date}-${shortSha}`);
+              core.setOutput('release_name', `Nightly ${date} (${shortSha})`);
+            }
+            core.setOutput('source_sha', sha);
+            core.setOutput('should_build', 'true');
+
   build-macos:
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
     strategy:
       matrix:
         include:
           - target: aarch64-apple-darwin
             runner: macos-latest
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,14 +119,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.target }}
+          if-no-files-found: error
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
 
   build-windows:
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -75,14 +153,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows
+          if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
 
   release:
-    needs: [build-macos, build-windows]
+    needs: [prepare, build-macos, build-windows]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || needs.prepare.outputs.nightly == 'true'
     permissions:
       contents: write
     steps:
@@ -92,9 +171,51 @@ jobs:
           path: artifacts
 
       - name: Create Release
+        if: needs.prepare.outputs.nightly != 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload nightly installers to a draft prerelease
+        if: needs.prepare.outputs.nightly == 'true'
+        id: nightly_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          target_commitish: ${{ needs.prepare.outputs.source_sha }}
+          name: ${{ needs.prepare.outputs.release_name }}
+          draft: true
+          prerelease: true
+          make_latest: 'false'
+          files: artifacts/**/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Automated nightly build of the default branch.
+
+            Source commit: [${{ needs.prepare.outputs.source_sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ needs.prepare.outputs.source_sha }}).
+
+            This prerelease does not replace the latest stable release. The app
+            retains its base version and displays the embedded build commit.
+
+      - name: Publish nightly after all installers are uploaded
+        if: needs.prepare.outputs.nightly == 'true'
+        uses: actions/github-script@v8
+        env:
+          RELEASE_ID: ${{ steps.nightly_release.outputs.id }}
+        with:
+          script: |
+            const releaseId = Number(process.env.RELEASE_ID);
+            if (!Number.isSafeInteger(releaseId) || releaseId <= 0) {
+              throw new Error('Nightly upload did not return a valid release ID');
+            }
+            await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: releaseId,
+              draft: false,
+              prerelease: true,
+              make_latest: 'false'
+            });

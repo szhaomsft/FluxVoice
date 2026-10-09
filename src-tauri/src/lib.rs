@@ -5,6 +5,9 @@ mod commands;
 mod history_export;
 mod hotkey;
 mod input;
+mod screen_context;
+#[cfg(windows)]
+mod floating_window;
 
 use crate::audio::AudioRecorder;
 use crate::commands::AppState;
@@ -35,7 +38,12 @@ pub fn run() {
             ));
             let injector = Arc::new(Mutex::new(TextInjector::new()));
 
-            app.manage(AppState { recorder, injector, recording_config: Mutex::new(None) });
+            app.manage(AppState {
+                recorder,
+                injector,
+                screen_context: Mutex::new(None),
+                recording_config: Mutex::new(None),
+            });
 
             // Position main window
             if let Some(window) = app.get_webview_window("main") {
@@ -95,8 +103,24 @@ pub fn run() {
                         }
                     }
 
+                    match commands::get_compact_mode(window_clone.app_handle().clone())
+                        .and_then(|compact| commands::resize_floating_window(&window_clone, compact))
+                    {
+                        Ok(()) => {}
+                        Err(error) => log::error!("Could not restore window mode: {}", error),
+                    }
+
                     // Show window after positioning
-                    let _ = window_clone.show();
+                    #[cfg(windows)]
+                    let shown = window_clone
+                        .hwnd()
+                        .map_err(|error| error.to_string())
+                        .and_then(|handle| floating_window::raise_window(handle.0 as usize));
+                    #[cfg(not(windows))]
+                    let shown = window_clone.show().map_err(|error| error.to_string());
+                    if let Err(error) = shown {
+                        log::error!("Could not show floating window: {}", error);
+                    }
                 });
             }
 
@@ -115,6 +139,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
+            commands::get_build_commit,
+            commands::get_compact_mode,
+            commands::set_compact_mode,
             commands::report_latency,
             commands::save_config_cmd,
             commands::start_recording,
