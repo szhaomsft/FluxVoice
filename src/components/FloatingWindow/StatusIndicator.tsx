@@ -16,7 +16,12 @@ function formatDuration(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-export const StatusIndicator: React.FC = () => {
+interface StatusIndicatorProps {
+  compact?: boolean;
+  details?: string;
+}
+
+export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ compact = false, details }) => {
   const { recordingState, error, uploadSize, recordingDuration } = useAppStore();
   const idleError = recordingState === 'idle' && error;
 
@@ -63,6 +68,22 @@ export const StatusIndicator: React.FC = () => {
     }
   };
 
+  const label = getLabel();
+  const description = typeof label === 'string' ? label : 'FluxVoice: Ready';
+
+  if (compact) {
+    return (
+      <div
+        className="w-full h-full flex items-center justify-center"
+        role="status"
+        aria-label={description}
+        title={[description, details].filter(Boolean).join(' | ')}
+      >
+        {getIcon()}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2 overflow-hidden">
       <div className="flex-shrink-0">{getIcon()}</div>
@@ -70,7 +91,7 @@ export const StatusIndicator: React.FC = () => {
         className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate"
         title={(recordingState === 'error' || idleError) && error ? error : undefined}
       >
-        {getLabel()}
+        {label}
       </span>
     </div>
   );

@@ -102,6 +102,13 @@ pub fn run() {
                         }
                     }
 
+                    match commands::get_compact_mode(window_clone.app_handle().clone())
+                        .and_then(|compact| commands::resize_floating_window(&window_clone, compact))
+                    {
+                        Ok(()) => {}
+                        Err(error) => log::error!("Could not restore window mode: {}", error),
+                    }
+
                     // Show window after positioning
                     #[cfg(windows)]
                     let shown = window_clone
@@ -132,6 +139,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::get_build_commit,
+            commands::get_compact_mode,
+            commands::set_compact_mode,
             commands::report_latency,
             commands::save_config_cmd,
             commands::start_recording,
