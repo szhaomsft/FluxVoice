@@ -2,8 +2,16 @@ import { useState, useRef } from 'react';
 import { Clock, Copy, Check, Trash2, Sparkles, Play, Square, Download } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
+import { invoke } from '@tauri-apps/api/core';
 import { useTranscriptionHistory } from '../../hooks/useTranscriptionHistory';
 import { getAudioFormat } from '../../utils/audioStorage';
+
+interface HistoryExportResult {
+  directory: string;
+  transcription_count: number;
+  audio_count: number;
+  missing_audio_count: number;
+}
 
 function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
@@ -25,6 +33,27 @@ export const TranscriptionHistory: React.FC = () => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [playingKey, setPlayingKey] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const exportPending = useRef(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<HistoryExportResult | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExportAll = async () => {
+    if (exportPending.current) return;
+    exportPending.current = true;
+    setExporting(true);
+    setExportResult(null);
+    setExportError(null);
+    try {
+      setExportResult(await invoke<HistoryExportResult | null>('export_history'));
+    } catch (err) {
+      console.error('Failed to export history:', err);
+      setExportError(String(err));
+    } finally {
+      exportPending.current = false;
+      setExporting(false);
+    }
+  };
 
   const handleCopy = async (text: string, key: string) => {
     try {
@@ -120,6 +149,7 @@ export const TranscriptionHistory: React.FC = () => {
   };
 
   const handleClearHistory = () => {
+    if (exportPending.current) return;
     if (confirm('Clear all transcription history?')) {
       clearHistory();
     }
@@ -143,14 +173,44 @@ export const TranscriptionHistory: React.FC = () => {
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {transcriptionHistory.length} transcription{transcriptionHistory.length !== 1 ? 's' : ''}
         </p>
-        <button
-          onClick={handleClearHistory}
-          className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-        >
-          <Trash2 className="w-4 h-4" />
-          Clear All
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportAll}
+            disabled={exporting}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            {exporting ? 'Exporting...' : 'Export All'}
+          </button>
+          <button
+            onClick={handleClearHistory}
+            disabled={exporting}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4" />
+            Clear All
+          </button>
+        </div>
       </div>
+      {exporting && (
+        <p role="status" className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+          Choose a directory. All saved recordings and transcripts will be exported to a new subfolder.
+        </p>
+      )}
+      {exportError && (
+        <p role="alert" className="mb-4 text-sm text-red-600 dark:text-red-400 break-words">
+          Export failed: {exportError}
+        </p>
+      )}
+      {exportResult && (
+        <div role="status" className="mb-4 text-sm text-green-700 dark:text-green-400 break-words">
+          <p>Exported {exportResult.audio_count} audio files and {exportResult.transcription_count} transcripts.</p>
+          <p>{exportResult.directory}</p>
+          {exportResult.missing_audio_count > 0 && (
+            <p>{exportResult.missing_audio_count} recordings had no saved audio; their transcripts were still exported.</p>
+          )}
+        </div>
+      )}
       <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
         {transcriptionHistory.map((item) => (
           <div
@@ -240,6 +300,7 @@ export const TranscriptionHistory: React.FC = () => {
                   </button>
                   <button
                     onClick={() => handleSaveAudio(item.audioData!, item.timestamp)}
+                    disabled={exporting}
                     className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-600 dark:text-gray-300 dark:hover:bg-gray-500 transition-colors"
                     title="Save recording"
                   >

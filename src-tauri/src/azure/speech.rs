@@ -79,25 +79,12 @@ pub fn validate_model_settings(language: &LanguageConfig) -> Result<(), String> 
 }
 
 fn audio_content_type(audio_data: &[u8], model: SttModel) -> Result<(&'static str, &'static str), String> {
-    if audio_data.starts_with(b"OggS") {
-        if model == SttModel::MaiTranscribe2 {
-            return Err("MAI-Transcribe-2 requires MP3 or WAV audio. Start a new recording with this model selected.".to_string());
-        }
-        Ok(("audio.ogg", "audio/ogg"))
-    } else if audio_data.starts_with(b"RIFF") && audio_data.get(8..12) == Some(b"WAVE") {
-        Ok(("audio.wav", "audio/wav"))
-    } else if (audio_data.starts_with(b"ID3") && audio_data.len() >= 10)
-        || audio_data.get(..4).is_some_and(|header| {
-            header[0] == 0xff && header[1] & 0xe0 == 0xe0
-                && header[1] & 0x06 == 0x02 && header[1] & 0x18 != 0x08
-                && header[2] & 0xf0 != 0 && header[2] & 0xf0 != 0xf0
-                && header[2] & 0x0c != 0x0c
-        })
-    {
-        Ok(("audio.mp3", "audio/mpeg"))
-    } else {
-        Err("Unsupported recording format: expected Opus/OGG, MP3, or WAV audio.".to_string())
+    use crate::audio::format::AudioFormat;
+    let format = AudioFormat::detect(audio_data)?;
+    if format == AudioFormat::Ogg && model == SttModel::MaiTranscribe2 {
+        return Err("MAI-Transcribe-2 requires MP3 or WAV audio. Start a new recording with this model selected.".to_string());
     }
+    Ok(format.upload_metadata())
 }
 
 pub async fn transcribe_audio(

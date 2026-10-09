@@ -13,6 +13,24 @@ A voice input method application with Azure Speech transcription and OpenAI poli
 - **Waveform visualization** - Real-time audio level display while recording
 - **Configurable settings** - Full customization of Azure credentials, hotkeys, and preferences
 
+### Export recordings and transcripts
+
+Open **Settings > History > Export All** and choose a destination directory.
+FluxVoice creates a fresh `fluxvoice-export-<UTC timestamp>` subfolder without
+overwriting existing exports. It contains original audio files (`.wav`, `.ogg`,
+or `.mp3`, without conversion), matching UTF-8 `.txt` files with original,
+processed (when available), and final text, and a `transcripts.json` index.
+Entries are ordered chronologically; numbered UTC filenames remain unique even
+when recordings share a timestamp.
+
+Export includes all saved history, not just visible entries. Wait for the latest
+recording to finish saving before exporting; pending background saves are not
+included in the snapshot. Entries without saved audio still get transcripts,
+and the completion message reports the missing-audio count. Invalid data and
+write errors are shown explicitly; a failed export may leave a partial folder.
+Exported audio and transcripts may contain sensitive information; keep the
+destination private.
+
 ## Prerequisites
 
 - Rust (install from https://rustup.rs/)

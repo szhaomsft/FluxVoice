@@ -2,6 +2,7 @@ mod audio;
 mod azure;
 mod config;
 mod commands;
+mod history_export;
 mod hotkey;
 mod input;
 
@@ -123,6 +124,7 @@ pub fn run() {
             commands::open_config_window,
             commands::save_history_item,
             commands::load_history,
+            commands::export_history,
             commands::clear_history,
             commands::update_stats,
             commands::get_stats,
