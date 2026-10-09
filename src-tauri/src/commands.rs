@@ -499,6 +499,37 @@ pub async fn load_history(app: tauri::AppHandle) -> Result<Vec<TranscriptionHist
 }
 
 #[tauri::command]
+pub async fn export_history(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<crate::history_export::HistoryExportResult>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_store::StoreExt;
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let directory = app.dialog().file()
+            .set_title("Choose directory for recordings and transcripts")
+            .set_parent(&window)
+            .blocking_pick_folder();
+        let Some(directory) = directory else { return Ok(None) };
+        let directory = directory.into_path()
+            .map_err(|error| format!("Export requires a local directory: {error}"))?;
+        let store = app.store(HISTORY_STORE_FILE)
+            .map_err(|error| format!("Failed to open history store: {error}"))?;
+        let items: Vec<TranscriptionHistoryItem> = match store.get("history") {
+            Some(value) => serde_json::from_value(value)
+                .map_err(|error| format!("Saved history is invalid: {error}"))?,
+            None => Vec::new(),
+        };
+        crate::history_export::export_all(&directory, &items).map(Some)
+    }).await.map_err(|error| format!("History export worker failed: {error}"))?;
+    if let Err(error) = &result {
+        log::error!("History export failed: {}", error);
+    }
+    result
+}
+
+#[tauri::command]
 pub async fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
 
