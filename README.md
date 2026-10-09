@@ -38,6 +38,28 @@ npm run tauri dev
 npm run tauri build
 ```
 
+## Automated Builds
+
+The **Build and Release** GitHub Actions workflow checks the default branch
+(`main`) daily at **00:00 UTC / 08:00 Beijing time**. GitHub may delay scheduled
+runs; the schedule becomes active when the workflow is on the default branch.
+
+If the head commit matches the last published nightly, it skips building.
+Otherwise, it builds Windows installers and macOS installers for Apple Silicon
+and Intel from the same pinned commit, then publishes a prerelease tagged
+`nightly-YYYY-MM-DD-COMMIT`. A failed build or upload does not publish the
+nightly; an unfinished draft is not treated as a successful build.
+
+Download nightly installers from the repository's
+[Releases page](https://github.com/szhaomsft/FluxVoice/releases). Nightlies do not
+replace the latest stable release or bump the app version; the floating
+window's embedded commit identifies the build. Pushing a `v*` tag still
+publishes a stable release.
+
+To check for a nightly manually, run the workflow from the Actions tab with
+**publish_nightly** enabled. Leaving it disabled retains the existing
+artifact-only manual build.
+
 ## Configuration
 
 ### First Time Setup
