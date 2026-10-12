@@ -232,6 +232,11 @@ compute time. Nested stage timings should not be added to their enclosing totals
 Timing diagnostics contain durations, status codes, and processing mode, not
 credentials or transcript text.
 
+Stopping recording waits for the audio worker to finish rather than sleeping for
+a fixed 100 ms. Final callback samples are retained even when device teardown
+takes longer; the completed sample buffer is moved into encoding without cloning.
+Device shutdown time still varies by driver and appears in `recorder_stop_wait_ms`.
+
 History and usage statistics are saved in a serialized background queue after a
 result is received, without delaying the return to idle. Save failures appear in
 the floating window when idle. Allow pending saves to finish before closing the

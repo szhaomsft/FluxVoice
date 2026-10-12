@@ -16,6 +16,7 @@ pub struct AudioRecorder {
     source_sample_rate: Arc<StdMutex<u32>>,
     source_channels: Arc<StdMutex<u16>>,
     stop_sender: Option<oneshot::Sender<()>>,
+    recording_thread: Option<thread::JoinHandle<Result<(), String>>>,
 }
 
 // Manually implement Send + Sync since we're not storing the Stream anymore
@@ -36,6 +37,7 @@ impl AudioRecorder {
             source_sample_rate: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE)),
             source_channels: Arc::new(StdMutex::new(1)),
             stop_sender: None,
+            recording_thread: None,
         })
     }
 
@@ -48,31 +50,12 @@ impl AudioRecorder {
             source_sample_rate: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE)),
             source_channels: Arc::new(StdMutex::new(1)),
             stop_sender: None,
+            recording_thread: None,
         }
     }
 
     pub fn start_recording(&mut self) -> Result<(), String> {
-        // Check if already recording - stop previous recording first
-        {
-            let is_recording = self.is_recording.lock().unwrap();
-            if *is_recording {
-                log::warn!("start_recording called but already recording - stopping previous recording first");
-                println!(">>> WARN: start_recording called but already recording");
-                drop(is_recording); // Release lock before stopping
-
-                // Send stop signal to previous recording
-                if let Some(sender) = self.stop_sender.take() {
-                    let _ = sender.send(());
-                }
-
-                // Wait for previous recording to stop
-                std::thread::sleep(std::time::Duration::from_millis(150));
-
-                // Force reset the flag
-                let mut is_rec = self.is_recording.lock().unwrap();
-                *is_rec = false;
-            }
-        }
+        self.finish_recording_thread()?;
 
         // Clear previous buffer
         {
@@ -107,7 +90,7 @@ impl AudioRecorder {
 
         // Spawn a dedicated thread for audio recording
         // This avoids the Send requirement since the Stream stays in this thread
-        thread::spawn(move || {
+        self.recording_thread = Some(thread::spawn(move || {
             println!(">>> Recording thread started");
             log::info!("Recording thread started");
 
@@ -122,7 +105,7 @@ impl AudioRecorder {
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
-                    return;
+                    return Err("No input device available".to_string());
                 }
             };
 
@@ -138,7 +121,7 @@ impl AudioRecorder {
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
-                    return;
+                    return Err(format!("Failed to get default input config: {}", e));
                 }
             };
 
@@ -191,7 +174,7 @@ impl AudioRecorder {
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
-                    return;
+                    return Err(format!("Unsupported sample format: {}", sample_format));
                 }
             };
 
@@ -203,7 +186,7 @@ impl AudioRecorder {
                     if let Ok(mut recording) = is_recording.lock() {
                         *recording = false;
                     }
-                    return;
+                    return Err(format!("Failed to build stream: {}", e));
                 }
             };
 
@@ -213,7 +196,7 @@ impl AudioRecorder {
                 if let Ok(mut recording) = is_recording.lock() {
                     *recording = false;
                 }
-                return;
+                return Err(format!("Failed to play stream: {}", e));
             }
 
             log::info!("Recording started - stream is playing");
@@ -238,7 +221,8 @@ impl AudioRecorder {
 
             log::info!("Recording thread stopped");
             println!(">>> Recording thread stopped");
-        });
+            Ok(())
+        }));
 
         Ok(())
     }
@@ -248,33 +232,16 @@ impl AudioRecorder {
         log::info!("stop_recording called");
         println!(">>> stop_recording called");
 
-        // Send stop signal
-        if let Some(sender) = self.stop_sender.take() {
-            println!(">>> Sending stop signal to recording thread");
-            let _ = sender.send(());
-        } else {
-            println!(">>> WARNING: No stop sender available - recording may not have started properly");
-            log::warn!("No stop sender available - recording may not have started properly");
-        }
-
-        // Wait a bit for the thread to stop
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let stopped = self.finish_recording_thread();
         println!("[latency] recorder_stop_wait_ms={:.1}", started.elapsed().as_secs_f64() * 1000.0);
+        stopped?;
         let preparation_started = std::time::Instant::now();
-
-        // Set recording flag to false
-        {
-            let mut recording = self.is_recording.lock().unwrap();
-            log::info!("Setting is_recording to false (was: {})", *recording);
-            println!(">>> Setting is_recording to false (was: {})", *recording);
-            *recording = false;
-        }
 
         // Get buffer data and source info
         let buffer_data = {
-            let buffer = self.buffer.lock().unwrap();
+            let mut buffer = self.buffer.lock().unwrap();
             println!(">>> Buffer contains {} samples", buffer.len());
-            buffer.clone()
+            std::mem::take(&mut *buffer)
         };
 
         let source_rate = *self.source_sample_rate.lock().unwrap();
@@ -356,6 +323,25 @@ impl AudioRecorder {
         println!("[latency] audio_encoding_ms={:.1} format={} success={}", encoding_started.elapsed().as_secs_f64() * 1000.0, if use_mp3 { "mp3" } else { "opus" }, result.is_ok());
         if let Ok(ref data) = result {
             println!(">>> Encoded successfully: {} bytes", data.len());
+        }
+        result
+    }
+
+    fn finish_recording_thread(&mut self) -> Result<(), String> {
+        if let Some(sender) = self.stop_sender.take() {
+            // A failed send means the worker has already exited; joining reports its result.
+            let _ = sender.send(());
+        }
+        let result = match self.recording_thread.take() {
+            Some(worker) => worker.join()
+                .map_err(|_| "Audio recording thread panicked".to_string())
+                .and_then(|result| result),
+            None => Ok(()),
+        };
+        *self.is_recording.lock()
+            .map_err(|_| "Audio recording state lock poisoned".to_string())? = false;
+        if let Err(error) = &result {
+            log::error!("Failed to finish audio recording: {}", error);
         }
         result
     }
@@ -642,6 +628,57 @@ fn create_opus_tags() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_waits_for_final_audio_and_moves_the_completed_buffer() {
+        for use_mp3 in [false, true] {
+            let mut recorder = AudioRecorder::new_dummy();
+            *recorder.is_recording.lock().unwrap() = true;
+            let buffer = Arc::clone(&recorder.buffer);
+            let (sender, receiver) = oneshot::channel();
+            recorder.stop_sender = Some(sender);
+            recorder.recording_thread = Some(thread::spawn(move || {
+                receiver.blocking_recv().unwrap();
+                // Model a driver whose final callback takes longer than the old fixed wait.
+                thread::sleep(std::time::Duration::from_millis(120));
+                *buffer.lock().unwrap() = vec![0.25; 8000];
+                Ok(())
+            }));
+            let audio = recorder.stop_recording(use_mp3).unwrap();
+            assert!(!audio.is_empty());
+            assert!(recorder.buffer.lock().unwrap().is_empty());
+            assert!(!*recorder.is_recording.lock().unwrap());
+            assert!(recorder.recording_thread.is_none());
+            assert!(recorder.stop_sender.is_none());
+        }
+    }
+
+    #[test]
+    fn finishing_reports_worker_errors_and_panics_and_resets_state() {
+        let mut recorder = AudioRecorder::new_dummy();
+        *recorder.is_recording.lock().unwrap() = true;
+        recorder.recording_thread = Some(thread::spawn(|| Err("Microphone startup failed".into())));
+        assert_eq!(recorder.finish_recording_thread().unwrap_err(), "Microphone startup failed");
+        assert!(!*recorder.is_recording.lock().unwrap());
+        *recorder.is_recording.lock().unwrap() = true;
+        recorder.recording_thread = Some(thread::spawn(|| panic!("test worker panic")));
+        assert_eq!(recorder.finish_recording_thread().unwrap_err(), "Audio recording thread panicked");
+        assert!(!*recorder.is_recording.lock().unwrap());
+        assert!(recorder.finish_recording_thread().is_ok());
+    }
+
+    #[test]
+    fn completed_worker_requires_no_fixed_stop_delay() {
+        let mut recorder = AudioRecorder::new_dummy();
+        let worker = thread::spawn(|| Ok(()));
+        while !worker.is_finished() {
+            thread::yield_now();
+        }
+        recorder.recording_thread = Some(worker);
+        let started = std::time::Instant::now();
+        recorder.finish_recording_thread().unwrap();
+        println!("[stop-check] completed_worker_wait_ms={:.3}", started.elapsed().as_secs_f64() * 1000.0);
+    }
 
     #[test]
     fn mp3_encoding_is_decodable_mono_16khz_48kbps_and_smaller_than_wav() {
