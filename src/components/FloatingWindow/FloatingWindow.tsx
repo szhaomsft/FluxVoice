@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { X } from 'lucide-react';
+import { X, Minimize2 } from 'lucide-react';
 import { Waveform } from './Waveform';
 import { IdleAnimation } from './IdleAnimation';
 import { ProcessingAnimation } from './ProcessingAnimation';
@@ -25,7 +25,7 @@ const MODE_COLORS: Record<string, string> = {
 };
 
 export const FloatingWindow: React.FC = () => {
-  const { recordingState } = useAppStore();
+  const { recordingState, setError } = useAppStore();
   const { startRecording, stopRecording } = useAudioRecording();
   const recordingStateRef = useRef(recordingState);
   const isProcessingHotkey = useRef(false);
@@ -34,10 +34,41 @@ export const FloatingWindow: React.FC = () => {
   const [postProcessingMode, setPostProcessingMode] = useState<'none' | 'polish' | 'translate'>('none');
   const [translateTargetLanguage, setTranslateTargetLanguage] = useState<string>('English');
   const [appVersion, setAppVersion] = useState<string>('');
+  const [isCompact, setIsCompact] = useState(false);
+  const [isModeLoaded, setIsModeLoaded] = useState(false);
+  const [isChangingMode, setIsChangingMode] = useState(false);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
 
-  // Load app version on mount
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => {});
+    invoke<boolean>('get_compact_mode')
+      .then((compact) => {
+        setIsCompact(compact);
+        setIsModeLoaded(true);
+      })
+      .catch((err) => {
+        console.error('Failed to load window mode:', err);
+        setError(`Could not load window mode: ${String(err)}`);
+      });
+  }, [setError]);
+
+  const toggleCompactMode = useCallback(async () => {
+    if (!isModeLoaded || isChangingMode) return;
+    setIsChangingMode(true);
+    try {
+      setIsCompact(await invoke<boolean>('set_compact_mode', { compact: !isCompact }));
+    } catch (err) {
+      console.error('Failed to change window mode:', err);
+      setError(`Could not change window mode: ${String(err)}`);
+    } finally {
+      setIsChangingMode(false);
+    }
+  }, [isCompact, isModeLoaded, isChangingMode, setError]);
+
+  // Use the native build's commit, not the current checkout's runtime HEAD.
+  useEffect(() => {
+    Promise.all([getVersion(), invoke<string>('get_build_commit')])
+      .then(([version, commit]) => setAppVersion(`${version} (${commit})`))
+      .catch((err) => console.error('Failed to load build identity:', err));
   }, []);
 
   // Load config on mount and whenever the window regains focus
@@ -164,16 +195,19 @@ export const FloatingWindow: React.FC = () => {
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Only start drag on left mouse button and not on interactive elements
     if (e.button === 0 && e.detail === 1) {
-      // Delay dragging slightly to allow double-click detection
-      setTimeout(async () => {
-        try {
-          await getCurrentWindow().startDragging();
-        } catch (err) {
-          // Ignore errors - window may have been closed or drag cancelled
-        }
-      }, 150);
+      dragStart.current = { x: e.screenX, y: e.screenY };
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const start = dragStart.current;
+    if (start && (e.buttons & 1) && Math.hypot(e.screenX - start.x, e.screenY - start.y) >= 4) {
+      dragStart.current = null;
+      void getCurrentWindow().startDragging().catch((err) => {
+        console.error('Failed to drag floating window:', err);
+        setError(`Could not move window: ${String(err)}`);
+      });
     }
   };
 
@@ -199,41 +233,71 @@ export const FloatingWindow: React.FC = () => {
 
   return (
     <div
-      className="w-full h-full bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 cursor-move relative"
+      className={`w-full h-full bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm shadow-2xl border border-gray-200 dark:border-gray-700 cursor-move relative ${isCompact ? 'rounded-full' : 'rounded-xl'}`}
       onMouseDown={handleMouseDown}
-      onDoubleClick={handleClick}
+      onMouseMove={handleMouseMove}
+      onMouseUp={() => { dragStart.current = null; }}
+      onMouseLeave={() => { dragStart.current = null; }}
+      onDoubleClick={() => { void (isCompact ? toggleCompactMode() : handleClick()); }}
+      onContextMenu={isCompact ? (e) => { e.preventDefault(); void handleClick(); } : undefined}
+      tabIndex={isCompact ? 0 : undefined}
+      role={isCompact ? 'button' : undefined}
+      aria-label={isCompact ? 'Tiny FluxVoice status. Double-click or press Enter to expand.' : undefined}
+      onKeyDown={isCompact ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          void toggleCompactMode();
+        }
+      } : undefined}
     >
-      <button
-        onClick={handleClose}
-        onMouseDown={(e) => e.stopPropagation()}
-        className="absolute top-1 right-1 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-        title="Close"
-      >
-        <X size={14} className="text-gray-500 dark:text-gray-400" />
-      </button>
-      {appVersion && (
-        <span className="absolute bottom-1 left-2 text-[8px] text-gray-400 dark:text-gray-600 select-none">
-          v{appVersion}
-        </span>
-      )}
-      <div className="p-3 h-full flex flex-col gap-2">
-        <StatusIndicator />
-        {recordingState === 'recording' && <Waveform />}
-        {recordingState === 'processing' && <ProcessingAnimation />}
-        {recordingState === 'idle' && <IdleAnimation />}
-        {recordingState === 'idle' && (
-          <div className="flex justify-center">
-            <button
-              onClick={cycleMode}
-              onMouseDown={(e) => e.stopPropagation()}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors cursor-pointer ${MODE_COLORS[postProcessingMode]}`}
-              title={`Mode: ${postProcessingMode} (click to cycle)`}
-            >
-              {MODE_ICONS[postProcessingMode]} {postProcessingMode === 'none' ? 'None' : postProcessingMode === 'polish' ? 'Polish' : translateTargetLanguage}
-            </button>
+      {isCompact ? (
+        <StatusIndicator compact details={`${appVersion ? `v${appVersion}. ` : ''}Double-click or press Enter to expand. Right-click for settings. Drag to move.`} />
+      ) : (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); void toggleCompactMode(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            disabled={!isModeLoaded || isChangingMode}
+            className="absolute top-1 right-7 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer disabled:opacity-50"
+            title="Use tiny status mode"
+            aria-label="Use tiny status mode"
+          >
+            <Minimize2 size={14} className="text-gray-500 dark:text-gray-400" />
+          </button>
+          <button
+            onClick={handleClose}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="absolute top-1 right-1 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+            title="Close"
+          >
+            <X size={14} className="text-gray-500 dark:text-gray-400" />
+          </button>
+          {appVersion && (
+            <span className="absolute bottom-1 left-2 text-[8px] text-gray-400 dark:text-gray-600 select-none">
+              v{appVersion}
+            </span>
+          )}
+          <div className="p-3 h-full flex flex-col gap-2">
+            <div className="pr-10"><StatusIndicator /></div>
+            {recordingState === 'recording' && <Waveform />}
+            {recordingState === 'processing' && <ProcessingAnimation />}
+            {recordingState === 'idle' && <IdleAnimation />}
+            {recordingState === 'idle' && (
+              <div className="flex justify-center">
+                <button
+                  onClick={cycleMode}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors cursor-pointer ${MODE_COLORS[postProcessingMode]}`}
+                  title={`Mode: ${postProcessingMode} (click to cycle)`}
+                >
+                  {MODE_ICONS[postProcessingMode]} {postProcessingMode === 'none' ? 'None' : postProcessingMode === 'polish' ? 'Polish' : translateTargetLanguage}
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 };

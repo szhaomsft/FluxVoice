@@ -27,6 +27,11 @@ pub fn report_latency(stages: Vec<LatencyStage>, success: bool) {
 // Global lock to prevent concurrent transcription operations
 static IS_TRANSCRIBING: AtomicBool = AtomicBool::new(false);
 
+#[tauri::command]
+pub fn get_build_commit() -> &'static str {
+    env!("FLUXVOICE_BUILD_COMMIT")
+}
+
 pub struct AppState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub injector: Arc<Mutex<TextInjector>>,
@@ -55,6 +60,82 @@ pub struct TranscriptionHistoryItem {
 const HISTORY_STORE_FILE: &str = "history.json";
 const STATS_STORE_FILE: &str = "stats.json";
 const WINDOW_STORE_FILE: &str = "window.json";
+
+fn compact_mode_from_value(value: Option<serde_json::Value>) -> Result<bool, String> {
+    match value {
+        None => Ok(false),
+        Some(value) => value.as_bool()
+            .ok_or_else(|| "Invalid compact window mode in window settings".to_string()),
+    }
+}
+
+fn floating_window_dimensions(compact: bool) -> (u32, u32) {
+    if compact { (32, 32) } else { (300, 100) }
+}
+
+pub(crate) fn resize_floating_window(window: &tauri::WebviewWindow, compact: bool) -> Result<(), String> {
+    let (width, height) = floating_window_dimensions(compact);
+    let size = tauri::LogicalSize::new(width as f64, height as f64);
+    window.set_size(size).map_err(|error| format!("Could not resize floating window: {error}"))?;
+    if let Some(monitor) = window.current_monitor().map_err(|error| error.to_string())? {
+        let position = window.outer_position().map_err(|error| error.to_string())?;
+        let physical_size = window.outer_size().map_err(|error| error.to_string())?;
+        let origin = monitor.position();
+        let bounds = monitor.size();
+        let right = origin.x + bounds.width.saturating_sub(physical_size.width) as i32;
+        let bottom = origin.y + bounds.height.saturating_sub(physical_size.height) as i32;
+        let visible_position = tauri::PhysicalPosition::new(
+            position.x.clamp(origin.x, right),
+            position.y.clamp(origin.y, bottom),
+        );
+        if position != visible_position {
+            window.set_position(visible_position).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_compact_mode(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_store::StoreExt;
+    let store = app.store(WINDOW_STORE_FILE).map_err(|error| error.to_string())?;
+    compact_mode_from_value(store.get("compact_mode"))
+}
+
+#[tauri::command]
+pub async fn set_compact_mode(app: tauri::AppHandle, compact: bool) -> Result<bool, String> {
+    use tauri_plugin_store::StoreExt;
+    let window = app.get_webview_window("main")
+        .ok_or_else(|| "Floating window is unavailable".to_string())?;
+    let store = app.store(WINDOW_STORE_FILE).map_err(|error| error.to_string())?;
+    let previous = compact_mode_from_value(store.get("compact_mode"))?;
+    let previous_size = window.inner_size().map_err(|error| error.to_string())?;
+    let previous_position = window.outer_position().map_err(|error| error.to_string())?;
+    let result = resize_floating_window(&window, compact).and_then(|()| {
+        store.set("compact_mode", serde_json::json!(compact));
+        store.save().map_err(|error| format!("Could not save window mode: {error}"))
+    });
+    if let Err(error) = result {
+        store.set("compact_mode", serde_json::json!(previous));
+        let mut rollback_errors = Vec::new();
+        for rollback in [
+            window.set_size(previous_size).map_err(|error| error.to_string()),
+            window.set_position(previous_position).map_err(|error| error.to_string()),
+            store.save().map_err(|error| error.to_string()),
+        ] {
+            if let Err(rollback_error) = rollback {
+                log::error!("Could not restore previous window mode: {}", rollback_error);
+                rollback_errors.push(rollback_error);
+            }
+        }
+        return Err(if rollback_errors.is_empty() {
+            error
+        } else {
+            format!("{}; rollback failed: {}", error, rollback_errors.join("; "))
+        });
+    }
+    Ok(compact)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DailyStats {
@@ -418,6 +499,37 @@ pub async fn load_history(app: tauri::AppHandle) -> Result<Vec<TranscriptionHist
 }
 
 #[tauri::command]
+pub async fn export_history(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<crate::history_export::HistoryExportResult>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_store::StoreExt;
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let directory = app.dialog().file()
+            .set_title("Choose directory for recordings and transcripts")
+            .set_parent(&window)
+            .blocking_pick_folder();
+        let Some(directory) = directory else { return Ok(None) };
+        let directory = directory.into_path()
+            .map_err(|error| format!("Export requires a local directory: {error}"))?;
+        let store = app.store(HISTORY_STORE_FILE)
+            .map_err(|error| format!("Failed to open history store: {error}"))?;
+        let items: Vec<TranscriptionHistoryItem> = match store.get("history") {
+            Some(value) => serde_json::from_value(value)
+                .map_err(|error| format!("Saved history is invalid: {error}"))?,
+            None => Vec::new(),
+        };
+        crate::history_export::export_all(&directory, &items).map(Some)
+    }).await.map_err(|error| format!("History export worker failed: {error}"))?;
+    if let Err(error) = &result {
+        log::error!("History export failed: {}", error);
+    }
+    result
+}
+
+#[tauri::command]
 pub async fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_store::StoreExt;
 
@@ -570,4 +682,23 @@ pub async fn load_window_position(app: tauri::AppHandle) -> Result<Option<Window
         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
     Ok(position)
+}
+
+#[cfg(test)]
+mod window_mode_tests {
+    use super::*;
+
+    #[test]
+    fn tiny_mode_is_exactly_32_logical_pixels() {
+        assert_eq!(floating_window_dimensions(true), (32, 32));
+        assert_eq!(floating_window_dimensions(false), (300, 100));
+    }
+
+    #[test]
+    fn existing_window_settings_default_to_normal_mode() {
+        assert!(!compact_mode_from_value(None).unwrap());
+        assert!(compact_mode_from_value(Some(serde_json::json!(true))).unwrap());
+        assert!(!compact_mode_from_value(Some(serde_json::json!(false))).unwrap());
+        assert!(compact_mode_from_value(Some(serde_json::json!("invalid"))).is_err());
+    }
 }

@@ -14,6 +14,24 @@ A voice input method application with Azure Speech transcription and OpenAI poli
 - **Waveform visualization** - Real-time audio level display while recording
 - **Configurable settings** - Full customization of Azure credentials, hotkeys, and preferences
 
+### Export recordings and transcripts
+
+Open **Settings > History > Export All** and choose a destination directory.
+FluxVoice creates a fresh `fluxvoice-export-<UTC timestamp>` subfolder without
+overwriting existing exports. It contains original audio files (`.wav`, `.ogg`,
+or `.mp3`, without conversion), matching UTF-8 `.txt` files with original,
+processed (when available), and final text, and a `transcripts.json` index.
+Entries are ordered chronologically; numbered UTC filenames remain unique even
+when recordings share a timestamp.
+
+Export includes all saved history, not just visible entries. Wait for the latest
+recording to finish saving before exporting; pending background saves are not
+included in the snapshot. Entries without saved audio still get transcripts,
+and the completion message reports the missing-audio count. Invalid data and
+write errors are shown explicitly; a failed export may leave a partial folder.
+Exported audio and transcripts may contain sensitive information; keep the
+destination private.
+
 ## Prerequisites
 
 - Rust (install from https://rustup.rs/)
@@ -37,6 +55,28 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
+
+## Automated Builds
+
+The **Build and Release** GitHub Actions workflow checks the default branch
+(`main`) daily at **00:00 UTC / 08:00 Beijing time**. GitHub may delay scheduled
+runs; the schedule becomes active when the workflow is on the default branch.
+
+If the head commit matches the last published nightly, it skips building.
+Otherwise, it builds Windows installers and macOS installers for Apple Silicon
+and Intel from the same pinned commit, then publishes a prerelease tagged
+`nightly-YYYY-MM-DD-COMMIT`. A failed build or upload does not publish the
+nightly; an unfinished draft is not treated as a successful build.
+
+Download nightly installers from the repository's
+[Releases page](https://github.com/szhaomsft/FluxVoice/releases). Nightlies do not
+replace the latest stable release or bump the app version; the floating
+window's embedded commit identifies the build. Pushing a `v*` tag still
+publishes a stable release.
+
+To check for a nightly manually, run the workflow from the Actions tab with
+**publish_nightly** enabled. Leaving it disabled retains the existing
+artifact-only manual build.
 
 ## Configuration
 
@@ -132,6 +172,19 @@ text. Capture failures produce a warning without preventing transcription.
 Hints bias recognition rather than guarantee it; their effectiveness depends
 on the language and model, including multilingual mode.
 
+### Tiny Status Mode
+
+Click the shrink button in the floating window to switch to a **32 x 32 logical
+pixel** indicator. It keeps the same recording shortcut and always-on-top
+behavior, showing ready (amber), recording (pulsing red microphone), processing
+(pulsing blue upload icon), and error (red alert) states. Hover for status
+details, recording duration, errors, and the build version.
+
+Double-click the indicator (or focus it and press Enter/Space) to expand back
+to the normal window. Right-click it to open settings, or drag it to reposition.
+The mode is saved across restarts; existing installations stay in normal mode
+until you opt in. Expanding near a screen edge keeps the window on-screen.
+
 ## Usage
 
 1. Launch FluxVoice - a small floating window will appear
@@ -149,10 +202,22 @@ on the language and model, including multilingual mode.
 
 ## Troubleshooting
 
+The floating window displays its version and build commit, for example
+`v0.2.2 (bb8374cc)`. The commit is embedded at build time, so it identifies the
+running build rather than the current checkout. A `-dirty` suffix indicates
+uncommitted changes at build time. Builds without Git metadata display
+`unknown` instead of a commit ID and emit a build warning.
+
 - **No audio**: Check microphone permissions and default device
 - **Transcription errors**: Verify Azure credentials and internet connection
 - **Text not inserting**: Enable auto-insert in settings, ensure target app accepts input
 - **Hotkey not working**: Check for conflicts with other applications
+
+On Windows, other always-on-top applications can cover the floating window.
+FluxVoice re-raises its visible window when the foreground application changes,
+without taking keyboard focus from your dictation target. Pressing the recording
+shortcut also shows and restores the window if it was hidden or minimized.
+Secure desktops and other Windows-managed overlays can still take precedence.
 
 ### Measuring recognition latency
 

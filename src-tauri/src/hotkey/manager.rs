@@ -8,6 +8,8 @@ use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
 use super::caps_lock::CapsLockHook;
+#[cfg(target_os = "windows")]
+use tauri::Manager;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -33,6 +35,13 @@ impl HotkeyManager {
     pub fn new(app_handle: tauri::AppHandle) -> Result<Self, String> {
         let (tx, rx) = mpsc::channel::<HotkeyCommand>();
         let (ready_tx, ready_rx) = mpsc::channel();
+        #[cfg(target_os = "windows")]
+        let window_handle = app_handle
+            .get_webview_window("main")
+            .ok_or_else(|| "Floating window is unavailable".to_string())?
+            .hwnd()
+            .map_err(|error| error.to_string())?
+            .0 as usize;
 
         // Spawn a dedicated thread for hotkey management
         thread::spawn(move || {
@@ -44,6 +53,15 @@ impl HotkeyManager {
                     return;
                 }
             };
+            #[cfg(target_os = "windows")]
+            let _foreground_watcher =
+                match crate::floating_window::ForegroundWatcher::new(window_handle) {
+                    Ok(watcher) => Some(watcher),
+                    Err(error) => {
+                        log::warn!("{}", error);
+                        None
+                    }
+                };
             if ready_tx.send(Ok(())).is_err() {
                 return;
             }
@@ -56,6 +74,12 @@ impl HotkeyManager {
             let mut caps_hook: Option<CapsLockHook> = None;
 
             let emit_event = |state: HotKeyState| {
+                #[cfg(target_os = "windows")]
+                if state == HotKeyState::Pressed {
+                    if let Err(error) = crate::floating_window::raise_window(window_handle) {
+                        log::warn!("{}", error);
+                    }
+                }
                 let name = match state {
                     HotKeyState::Pressed => "hotkey-pressed",
                     HotKeyState::Released => "hotkey-released",
