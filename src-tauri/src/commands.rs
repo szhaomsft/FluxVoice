@@ -201,6 +201,7 @@ pub async fn start_recording(app: tauri::AppHandle, state: State<'_, AppState>) 
     speech::validate_model_settings(&config.language)?;
     let mut screen_context = state.screen_context.lock().await;
     *screen_context = None;
+    println!("[screen-context] enabled={}", config.features.screen_phrase_hints_enabled);
     let capture = if config.features.screen_phrase_hints_enabled {
         Some(crate::screen_context::start_capture())
     } else {
@@ -287,6 +288,7 @@ pub async fn transcribe_and_insert(
     }
 
     let mut warnings = Vec::new();
+    let hints_started = Instant::now();
     let phrases = if config.features.screen_phrase_hints_enabled {
         let result = match capture {
             Some(Ok(capture)) => capture.finish().await,
@@ -304,6 +306,12 @@ pub async fn transcribe_and_insert(
     } else {
         Vec::new()
     };
+    println!(
+        "[screen-context] enabled={} request_phrase_count={} finish_wait_ms={:.1}",
+        config.features.screen_phrase_hints_enabled,
+        phrases.len(),
+        hints_started.elapsed().as_secs_f64() * 1000.0,
+    );
 
     // Transcribe audio with retry
     let speech_started = Instant::now();

@@ -17,6 +17,7 @@ use tokio::sync::oneshot;
 
 static CAPTURE_BUSY: AtomicBool = AtomicBool::new(false);
 const MAX_ELEMENTS: usize = 256;
+const MAX_DEPTH: usize = 64;
 const MAX_TEXT_CHARS: usize = 12_000;
 const WORK_BUDGET: Duration = Duration::from_millis(750);
 
@@ -46,6 +47,7 @@ pub(super) fn start_capture() -> Result<Capture, String> {
     }
     // Never collect FluxVoice's settings, which can contain service credentials.
     if process_id == std::process::id() {
+        println!("[screen-context] capture_skipped=fluxvoice_foreground");
         let (sender, receiver) = oneshot::channel();
         let _ = sender.send(Ok(Vec::new()));
         return Ok(Capture { receiver, started });
@@ -64,6 +66,15 @@ pub(super) fn start_capture() -> Result<Capture, String> {
         .spawn(move || {
             let _guard = guard;
             let result = capture_window(HWND(handle as *mut _), process_id, started);
+            println!(
+                "[screen-context] capture_ms={:.1} success={} phrase_count={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                result.is_ok(),
+                result.as_ref().map_or(0, Vec::len),
+            );
+            if let Err(error) = &result {
+                log::warn!("Screen context capture failed: {}", error);
+            }
             let _ = sender.send(result);
         })
         .map_err(|error| format!("Could not start screen context worker: {error}"))?;
@@ -106,13 +117,14 @@ fn capture_window(window: HWND, process_id: u32, started: Instant) -> Result<Vec
             visited: 0,
             text_chars: 0,
             collector: PhraseCollector::default(),
+            diagnostics: Diagnostics::default(),
         };
         let focused = automation
             .GetFocusedElement()
             .map_err(|error| error.to_string())?;
         let mut ancestor = focused.clone();
         let mut focused_in_window = false;
-        for _ in 0..32 {
+        for _ in 0..=MAX_DEPTH {
             if reader.exhausted() {
                 return Err("Screen context capture exceeded its time budget".into());
             }
@@ -121,6 +133,7 @@ fn capture_window(window: HWND, process_id: u32, started: Instant) -> Result<Vec
                 .map_err(|error| error.to_string())?
                 .as_bool()
             {
+                println!("[screen-context] capture_skipped=password_focus");
                 return Ok(Vec::new());
             }
             if automation
@@ -143,6 +156,10 @@ fn capture_window(window: HWND, process_id: u32, started: Instant) -> Result<Vec
                 .map_err(|error| error.to_string())?;
         }
         reader.visit(&root, 0).map_err(|error| error.to_string())?;
+        println!(
+            "[screen-context] focused_in_window={} visited={} text_chars={} budget_exhausted={} diagnostics={:?}",
+            focused_in_window, reader.visited, reader.text_chars, reader.exhausted(), reader.diagnostics,
+        );
         log::info!(
             "Screen context captured {} phrase hints",
             reader.collector.phrases.len()
@@ -158,6 +175,17 @@ struct Reader {
     visited: usize,
     text_chars: usize,
     collector: PhraseCollector,
+    diagnostics: Diagnostics,
+}
+
+#[derive(Debug, Default)]
+struct Diagnostics {
+    depth_skipped: usize,
+    offscreen_skipped: usize,
+    bounds_skipped: usize,
+    protected_skipped: usize,
+    leaves: usize,
+    text_patterns: usize,
 }
 
 impl Reader {
@@ -182,22 +210,32 @@ impl Reader {
         element: &IUIAutomationElement,
         depth: usize,
     ) -> ::windows::core::Result<()> {
-        if self.exhausted() || depth > 16 {
+        if self.exhausted() {
+            return Ok(());
+        }
+        if depth > MAX_DEPTH {
+            self.diagnostics.depth_skipped += 1;
             return Ok(());
         }
         self.visited += 1;
         // Fail closed: do not read names, text, or children of protected elements.
-        if element.CurrentIsPassword()?.as_bool() || element.CurrentIsOffscreen()?.as_bool() {
+        if element.CurrentIsPassword()?.as_bool() {
+            self.diagnostics.protected_skipped += 1;
+            return Ok(());
+        }
+        if element.CurrentIsOffscreen()?.as_bool() {
+            self.diagnostics.offscreen_skipped += 1;
             return Ok(());
         }
         let rect = element.CurrentBoundingRectangle()?;
-        if rect.right <= self.bounds.left
-            || rect.left >= self.bounds.right
-            || rect.bottom <= self.bounds.top
-            || rect.top >= self.bounds.bottom
-            || rect.right <= rect.left
-            || rect.bottom <= rect.top
+        let has_bounds = rect.right > rect.left && rect.bottom > rect.top;
+        if has_bounds
+            && (rect.right <= self.bounds.left
+                || rect.left >= self.bounds.right
+                || rect.bottom <= self.bounds.top
+                || rect.top >= self.bounds.bottom)
         {
+            self.diagnostics.bounds_skipped += 1;
             return Ok(());
         }
         // windows 0.58 represents a successful null COM interface as Err(S_OK).
@@ -208,9 +246,12 @@ impl Reader {
         };
         // Container text patterns can include hidden or password descendants.
         // Read only visible text ranges of leaves; never read ValuePattern.
-        if child.is_none() {
+        // Non-rendered web accessibility containers may have visible descendants.
+        if child.is_none() && has_bounds {
+            self.diagnostics.leaves += 1;
             match element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
                 Ok(pattern) => {
+                    self.diagnostics.text_patterns += 1;
                     let ranges = pattern.GetVisibleRanges()?;
                     for index in 0..ranges.Length()?.min(8) {
                         if self.exhausted() {
@@ -254,6 +295,26 @@ mod tests {
         ES_PASSWORD, MSG, PM_REMOVE, WINDOW_STYLE, WS_CHILD, WS_EX_NOACTIVATE, WS_POPUP,
         WS_VISIBLE,
     };
+
+    #[test]
+    #[ignore = "Reads foreground UI Automation text; requires explicit interactive debugging"]
+    fn diagnose_foreground_capture_without_logging_text() {
+        let window = unsafe { GetForegroundWindow() };
+        let mut process_id = 0;
+        unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
+        let started = Instant::now();
+        let result = capture_window(window, process_id, started);
+        println!(
+            "[screen-context] foreground_probe_ms={:.1} success={} phrase_count={}",
+            started.elapsed().as_secs_f64() * 1000.0,
+            result.is_ok(),
+            result.as_ref().map_or(0, Vec::len),
+        );
+        if let Err(error) = &result {
+            println!("[screen-context] foreground_probe_error={}", error);
+        }
+        assert!(result.is_ok(), "Foreground capture failed");
+    }
 
     #[test]
     #[ignore = "Creates a non-activating native window; requires an interactive Windows desktop"]
@@ -367,8 +428,15 @@ mod tests {
                 visited: 0,
                 text_chars: 0,
                 collector: PhraseCollector::default(),
+                diagnostics: Diagnostics::default(),
             };
-            reader.visit(&root, 0).map(|()| reader.collector.phrases)
+            // Model a native subtree below 17 web accessibility wrappers.
+            let result = reader.visit(&root, 17);
+            println!(
+                "[screen-context-fixture] visited={} text_chars={} budget_exhausted={} diagnostics={:?}",
+                reader.visited, reader.text_chars, reader.exhausted(), reader.diagnostics,
+            );
+            result.map(|()| reader.collector.phrases)
         };
         stop_tx.send(()).unwrap();
         ui_thread.join().unwrap();
