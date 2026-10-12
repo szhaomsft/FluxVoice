@@ -47,7 +47,11 @@ impl PhraseCollector {
         let phrase = phrase.trim();
         let count = phrase.chars().count();
         if self.phrases.len() < MAX_PHRASES
-            && (3..=MAX_PHRASE_CHARS).contains(&count)
+            && count <= MAX_PHRASE_CHARS
+            && (count >= 3
+                || (count == 2
+                    && (phrase.chars().all(is_han)
+                        || phrase.chars().all(|c| c.is_ascii_uppercase()))))
             && phrase.chars().any(char::is_alphabetic)
             && self.seen.insert(phrase.to_lowercase())
         {
@@ -56,11 +60,6 @@ impl PhraseCollector {
     }
 
     fn collect(&mut self, text: &str) {
-        const COMMON_WORDS: &[&str] = &[
-            "the", "and", "for", "with", "this", "that", "from", "are", "was", "you", "your",
-            "have", "not", "but", "can", "all", "file", "edit", "view", "help", "window", "close",
-            "minimize", "maximize",
-        ];
         for line in text.lines() {
             let words: Vec<&str> = line.split_whitespace().collect();
             if (2..=6).contains(&words.len()) {
@@ -70,8 +69,20 @@ impl PhraseCollector {
                 line.split(|c: char| !c.is_alphanumeric() && !matches!(c, '-' | '_' | '\'' | '.'))
             {
                 let word = word.trim_matches(|c: char| !c.is_alphanumeric());
-                if !COMMON_WORDS.contains(&word.to_lowercase().as_str()) {
-                    self.add(word);
+                let mut start = 0;
+                let mut previous_han = word.chars().next().is_some_and(is_han);
+                for (index, character) in word.char_indices() {
+                    let han = is_han(character);
+                    if han != previous_han {
+                        self.collect_word(&word[start..index]);
+                        start = index;
+                    }
+                    previous_han = han;
+                }
+                self.collect_word(&word[start..]);
+                // Preserve existing mixed-script names as well as their individual terms.
+                if start > 0 {
+                    self.collect_word(word);
                 }
                 if self.phrases.len() == MAX_PHRASES {
                     return;
@@ -79,6 +90,23 @@ impl PhraseCollector {
             }
         }
     }
+
+    fn collect_word(&mut self, word: &str) {
+        const COMMON_WORDS: &[&str] = &[
+            "the", "and", "for", "with", "this", "that", "from", "are", "was", "you", "your",
+            "have", "not", "but", "can", "all", "file", "edit", "view", "help", "window", "close",
+            "minimize", "maximize",
+        ];
+        if !COMMON_WORDS.contains(&word.to_lowercase().as_str()) {
+            self.add(word);
+        }
+    }
+}
+
+fn is_han(character: char) -> bool {
+    matches!(character as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF |
+        0x20000..=0x2FA1F | 0x30000..=0x323AF)
 }
 
 #[cfg(test)]
@@ -113,6 +141,24 @@ mod tests {
             .phrases
             .iter()
             .all(|phrase| phrase.chars().count() <= MAX_PHRASE_CHARS));
+    }
+
+    #[test]
+    fn extracts_english_terms_embedded_in_chinese_and_short_names() {
+        let mut collector = PhraseCollector::default();
+        collector.collect(
+            "使用FluxVoice进行识别，调用AzureOpenAI处理STT结果。\n微软 腾讯 AI\nFluxVoice",
+        );
+        for term in ["FluxVoice", "AzureOpenAI", "STT", "微软", "腾讯", "AI"] {
+            assert!(
+                collector.phrases.contains(&term.to_string()),
+                "Missing term: {term}"
+            );
+        }
+        assert_eq!(
+            collector.phrases.iter().filter(|term| *term == "FluxVoice").count(),
+            1
+        );
     }
 
     #[tokio::test]

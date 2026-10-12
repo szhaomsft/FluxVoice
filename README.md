@@ -172,6 +172,19 @@ text. Capture failures produce a warning without preventing transcription.
 Hints bias recognition rather than guarantee it; their effectiveness depends
 on the language and model, including multilingual mode.
 
+For Chinese speech mixed with English terms, try **Multilingual** mode: selecting
+both `zh-CN` and `en-US` with Multilingual off asks Fast STT to identify one language
+per recording, rather than continuously transcribe language switches.
+The hint extractor separates English terms embedded in Chinese text (for example,
+`FluxVoice` in `使用FluxVoice进行识别`) and retains two-character Chinese terms.
+
+Lines prefixed with `[screen-context]` show capture duration, visited elements,
+limits reached, and hint counts at capture and request time, without logging
+captured text. Zero hints can mean the target app exposes no accessible text,
+focus is in FluxVoice or a password field, or the capture failed. Browser and
+WebView content is traversed through non-rendered accessibility containers, up to
+64 levels deep, while retaining the existing time, element, and text limits.
+
 ### Tiny Status Mode
 
 Click the shrink button in the floating window to switch to a **32 x 32 logical

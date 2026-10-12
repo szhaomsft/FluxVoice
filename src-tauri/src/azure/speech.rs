@@ -120,6 +120,7 @@ pub async fn transcribe_audio(
 
     let definition_json = serde_json::to_string(&definition)
         .map_err(|e| format!("Failed to serialize definition: {}", e))?;
+    println!("[screen-context] speech_request_phrase_count={}", phrases.len());
 
     // Match the multipart metadata to the actual recording format.
     let audio_part = multipart::Part::bytes(audio_data)
