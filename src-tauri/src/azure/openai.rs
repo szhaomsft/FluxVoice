@@ -66,13 +66,14 @@ async fn call_openai(
         .send()
         .await;
     println!("[latency] openai_request_to_headers_ms={:.1} success={}", request_started.elapsed().as_secs_f64() * 1000.0, response_result.is_ok());
-    let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
+    let response = response_result.map_err(|e| super::request_error("OpenAI", "sending text or waiting for response", e))?;
 
     let status = response.status();
     println!("[latency] openai_http_status={}", status.as_u16());
 
     if !status.is_success() {
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response.text().await
+            .map_err(|e| super::request_error("OpenAI", "reading error response", e))?;
         return Err(format!("API error ({}): {}", status, error_body));
     }
 
@@ -80,7 +81,7 @@ async fn call_openai(
     let result: ChatCompletionResponse = response
         .json()
         .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+        .map_err(|e| super::request_error("OpenAI", "reading generated text", e))?;
     println!("[latency] openai_response_body_parse_ms={:.1}", body_started.elapsed().as_secs_f64() * 1000.0);
 
     result

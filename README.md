@@ -138,6 +138,10 @@ and [native binding project](https://github.com/DoumanAsh/mp3lame-sys).
 Default hotkey is **Ctrl+Shift+Z**. Hold the shortcut to record, then release it
 to stop and transcribe.
 
+If you release the shortcut while recording is still starting, FluxVoice queues
+the release and stops as soon as startup completes. Hotkey listeners remain
+registered across UI updates so those updates do not interrupt release handling.
+
 For a single key close to your left hand on Windows, open **Settings > General
 Settings > Recording Shortcut**, select **Caps Lock**, and click **Save
 Configuration**. The change takes effect immediately and is saved for future
@@ -233,6 +237,13 @@ shortcut also shows and restores the window if it was hidden or minimized.
 Secure desktops and other Windows-managed overlays can still take precedence.
 
 ### Measuring recognition latency
+
+Speech and OpenAI requests have a 10-second connection timeout and a 60-second
+total timeout per attempt, including upload and response-body download. Speech
+can retry once after a one-second delay, so two stalled attempts can take about
+121 seconds before an error appears and recording becomes available again.
+Polishing/translation has its own 60-second limit; on failure, the original
+transcript is used with a warning. Connection warmup retains its five-second limit.
 
 Run `npm run tauri dev` and make a normal recording. Lines prefixed with
 `[latency]` report milliseconds spent stopping and preparing audio, encoding,
