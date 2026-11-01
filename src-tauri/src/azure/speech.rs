@@ -144,13 +144,14 @@ pub async fn transcribe_audio(
         .send()
         .await;
     println!("[latency] speech_request_to_headers_ms={:.1} success={}", request_started.elapsed().as_secs_f64() * 1000.0, response_result.is_ok());
-    let response = response_result.map_err(|e| format!("Request failed: {}", e))?;
+    let response = response_result.map_err(|e| super::request_error("Speech", "uploading audio or waiting for response", e))?;
 
     let status = response.status();
     println!("[latency] speech_http_status={}", status.as_u16());
 
     if !status.is_success() {
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response.text().await
+            .map_err(|e| super::request_error("Speech", "reading error response", e))?;
         return Err(format!("API error ({}): {}", status, error_body));
     }
 
@@ -158,7 +159,7 @@ pub async fn transcribe_audio(
     let result: FastTranscriptionResponse = response
         .json()
         .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+        .map_err(|e| super::request_error("Speech", "reading transcription response", e))?;
     println!("[latency] speech_response_body_parse_ms={:.1}", body_started.elapsed().as_secs_f64() * 1000.0);
 
     // Extract text from combinedPhrases (preferred) or phrases

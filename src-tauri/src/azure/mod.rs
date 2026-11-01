@@ -6,16 +6,30 @@ use std::time::Duration;
 
 /// Global HTTP client for connection pooling (HTTP Keep-Alive)
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn get_http_client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+    HTTP_CLIENT.get_or_init(|| build_http_client(REQUEST_TIMEOUT))
+}
+
+fn build_http_client(timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(timeout)
             .pool_idle_timeout(Duration::from_secs(600))
             .pool_max_idle_per_host(2)
             .tcp_keepalive(Duration::from_secs(60))
             .build()
             .expect("Failed to create HTTP client")
-    })
+}
+
+pub fn request_error(service: &str, stage: &str, error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        format!("{} request timed out after {} seconds while {}. Check your connection and try again.",
+            service, REQUEST_TIMEOUT.as_secs(), stage)
+    } else {
+        format!("{} failed while {}: {}", service, stage, error)
+    }
 }
 
 pub async fn warm_connections(speech_region: &str, openai_endpoint: Option<&str>) {
@@ -88,6 +102,49 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn stalled_headers_and_response_bodies_time_out_and_allow_retry() {
+        for send_headers in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut buffer = [0; 1024];
+                    let count = stream.read(&mut buffer).await.unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                if send_headers {
+                    stream.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n",
+                    ).await.unwrap();
+                }
+                // Keep the stalled socket open while a subsequent request succeeds.
+                let (mut retry, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 1024];
+                assert!(retry.read(&mut buffer).await.unwrap() > 0);
+                retry.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                ).await.unwrap();
+            });
+            let client = build_http_client(Duration::from_millis(300));
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let error = match client.get(&endpoint).send().await {
+                    Ok(response) => response.json::<serde_json::Value>().await.unwrap_err(),
+                    Err(error) => error,
+                };
+                assert!(error.is_timeout(), "Expected timeout: {error}");
+                assert!(request_error("Speech", "receiving response", error)
+                    .contains("timed out after 60 seconds"));
+                let response = client.get(&endpoint).send().await.unwrap();
+                assert_eq!(response.json::<serde_json::Value>().await.unwrap(), serde_json::json!({}));
+                server.await.unwrap();
+            }).await.expect("Request did not time out or recover");
+        }
+    }
 
     #[tokio::test]
     async fn warmup_sends_no_credentials_and_reuses_connection() {

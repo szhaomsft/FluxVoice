@@ -27,7 +27,8 @@ const MODE_COLORS: Record<string, string> = {
 export const FloatingWindow: React.FC = () => {
   const { recordingState, setError } = useAppStore();
   const { startRecording, stopRecording } = useAudioRecording();
-  const recordingStateRef = useRef(recordingState);
+  const recordingActions = useRef({ startRecording, stopRecording });
+  recordingActions.current = { startRecording, stopRecording };
   const isProcessingHotkey = useRef(false);
   const pendingRelease = useRef(false);
   const lastActionTime = useRef(0); // Debounce protection
@@ -115,23 +116,6 @@ export const FloatingWindow: React.FC = () => {
     }
   }, [postProcessingMode]);
 
-  // Keep ref in sync with state
-  useEffect(() => {
-    recordingStateRef.current = recordingState;
-
-    // Reset pending release when returning to idle state
-    if (recordingState === 'idle') {
-      pendingRelease.current = false;
-    }
-
-    // If we have a pending release and now we're recording, stop recording
-    if (pendingRelease.current && recordingState === 'recording') {
-      pendingRelease.current = false;
-      console.log('Processing pending release - stopping recording');
-      stopRecording();
-    }
-  }, [recordingState, stopRecording]);
-
   useEffect(() => {
     // Listen for hotkey press - start recording
     const unlistenPress = listen('hotkey-pressed', async () => {
@@ -148,7 +132,7 @@ export const FloatingWindow: React.FC = () => {
         return;
       }
 
-      const currentState = recordingStateRef.current;
+      const currentState = useAppStore.getState().recordingState;
       console.log('Hotkey pressed, current state:', currentState);
 
       // Only start if idle - not if processing or already recording
@@ -157,25 +141,33 @@ export const FloatingWindow: React.FC = () => {
         lastActionTime.current = now;
         pendingRelease.current = false;
         try {
-          await startRecording();
+          await recordingActions.current.startRecording();
         } finally {
           isProcessingHotkey.current = false;
+          // Startup has released its operation lock; only now can a queued stop run.
+          if (pendingRelease.current) {
+            pendingRelease.current = false;
+            if (useAppStore.getState().recordingState === 'recording') {
+              lastActionTime.current = Date.now();
+              await recordingActions.current.stopRecording();
+            }
+          }
         }
       }
     });
 
     // Listen for hotkey release - stop recording
     const unlistenRelease = listen('hotkey-released', async () => {
-      const currentState = recordingStateRef.current;
+      const currentState = useAppStore.getState().recordingState;
       console.log('Hotkey released, current state:', currentState);
 
-      if (currentState === 'recording') {
-        lastActionTime.current = Date.now();
-        await stopRecording();
-      } else if (isProcessingHotkey.current) {
+      if (isProcessingHotkey.current) {
         // Recording is still starting, mark as pending release
         console.log('Release during start - marking as pending');
         pendingRelease.current = true;
+      } else if (currentState === 'recording') {
+        lastActionTime.current = Date.now();
+        await recordingActions.current.stopRecording();
       }
     });
 
@@ -183,7 +175,7 @@ export const FloatingWindow: React.FC = () => {
       unlistenPress.then((fn) => fn());
       unlistenRelease.then((fn) => fn());
     };
-  }, [startRecording, stopRecording]);
+  }, []);
 
   const handleClick = async () => {
     // Open configuration window
